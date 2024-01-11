@@ -1,0 +1,122 @@
+version: 2.1
+
+parameters:
+  ros-distro:
+    type: string
+    default: "humble"
+
+jobs:
+  restore_submodules:
+    docker:
+      - image: ros:<< pipeline.parameters.ros-distro >>-ros-base
+    resource_class: medium
+    steps:
+      - checkout
+      - add_ssh_keys:
+          fingerprints:
+            - "e0:4c:b7:05:97:37:53:c0:e9:08:f4:46:2e:76:3f:b2"
+      - run:
+          name: "Update"
+          command: sudo apt update 
+      - run:
+          name: Restore Submodules
+          command: |
+            apt-get install openssh-client -y
+            git submodule sync && git submodule update --init
+      - persist_to_workspace:
+          root: .
+          paths:
+            - src
+
+  build:
+    docker:
+      - image: ros:<< pipeline.parameters.ros-distro >>-ros-base
+    resource_class: medium
+    steps:
+      - checkout
+      - attach_workspace:
+          at: .         
+      - run:
+          name: Install dependencies
+          command: |            
+            source /opt/ros/<< pipeline.parameters.ros-distro >>/setup.bash
+            rosdep update
+            rosdep install --from-paths src -y --ignore-src
+      - run:
+          name: Build
+          command: |
+            source /opt/ros/<< pipeline.parameters.ros-distro >>/setup.bash
+            colcon build
+      - persist_to_workspace:
+          root: .
+          paths:
+            - build
+            - install
+
+  test:
+    docker:
+      - image: ros:<< pipeline.parameters.ros-distro >>-ros-base
+    resource_class: medium
+    steps:
+      - checkout
+      - attach_workspace:
+          at: .
+      - run:
+          name: Test
+          command : |
+            source install/setup.bash
+            colcon test
+            colcon test-result --verbose
+
+  lint:
+    docker:
+      - image: cimg/base:current-22.04
+    resource_class: medium
+    steps:
+      - checkout
+      - run:
+          name: Install pip
+          command: |
+            sudo apt update
+            sudo apt install python3-pip
+      - run:
+          name: Install pycodestyle and pylint
+          command: pip install pycodestyle pylint
+      - run:
+          name: Run pycodestyle
+          command: pycodestyle . --config=setup.cfg || (echo "Please make sure the pre-commit hooks are installed correctly. This will ensure linting errors are resolved before committing" && exit 1)
+      - run:
+          name: Run pylint
+          command: pylint -sn --recursive=y . || (echo "Please make sure the pre-commit hooks are installed correctly and pylint is installed locally. This will ensure linting errors are resolved before committing" && exit 1)
+  
+  test_docker_build:
+    machine:
+      image:  ubuntu-2204:2023.07.2
+    resource_class: medium
+    steps:
+      - checkout
+      - attach_workspace:
+          at: .
+      - run:
+          name: build docker image
+          command: ./build.sh
+
+
+# Orchestrate jobs using workflows
+# See: https://circleci.com/docs/configuration-reference/#workflows
+workflows:
+  build_test_lint:
+    jobs:
+      - lint
+      - restore_submodules:
+          requires:
+            - lint
+      - build:
+          requires:
+            - restore_submodules
+      - test:
+          requires:
+            - build
+      - test_docker_build:
+          requires:
+            - restore_submodules

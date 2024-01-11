@@ -1,0 +1,13 @@
+[MASTER]
+disable=all
+enable=invalid-name,nan-comparison,disallowed-name,no-self-argument,bad-classmethod-argument,bare-except,inconsistent-return-statements,use-implicit-booleaness-not-len
+
+[BASIC]
+bad-names=foo,bar,l,O,I
+variable-rgx=[a-z0-9_]{1,40}$
+class-const-naming-style=any
+const-naming-style=any
+
+[EXCEPTIONS]
+# Exceptions that will emit a warning when being caught. Defaults to "Exception"
+overgeneral-exceptions=builtins.BaseException,builtins.Exception
