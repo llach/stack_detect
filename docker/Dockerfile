@@ -25,6 +25,9 @@ RUN chown -R ${UID}:${GID} /ws/
 
 USER ${USERNAME}
 
+COPY docker/fastrps-upd-profile.xml /home/ros/
+ENV  FASTRTPS_DEFAULT_PROFILES_FILE=/home/ros/fastrps-upd-profile.xml
+
 COPY . /ws/
 
 # Install ROS dependencies

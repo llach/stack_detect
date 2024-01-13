@@ -13,7 +13,6 @@ DOCKER_ARGS=${DOCKER_VOLUMES}
 # Run the command
 docker run -it --rm \
                 --net=host \
-                --ipc=host \
                 --hostname="$(hostname)" \
                 --privileged  \
                 ${DOCKER_ARGS} \
