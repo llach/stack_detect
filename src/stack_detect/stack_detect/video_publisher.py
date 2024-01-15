@@ -4,7 +4,7 @@ from std_msgs.msg import String
 from realsense2_camera_msgs.msg import Metadata
 
 
-class MinimalPublisher(Node):  # type: ignore
+class VideoPublisher(Node):  # type: ignore
     def __init__(self) -> None:
         super().__init__("minimal_publisher")
         self.publisher_ = self.create_publisher(String, "topic", 10)
@@ -28,15 +28,11 @@ class MinimalPublisher(Node):  # type: ignore
         pass
 
 
-def test_function():
-    """Description of function"""
-    return "test function"
-
 
 def main(args=None) -> None:  # type: ignore
     rclpy.init(args=args)
 
-    minimal_publisher = MinimalPublisher()
+    minimal_publisher = VideoPublisher()
 
     rclpy.spin(minimal_publisher)
 
