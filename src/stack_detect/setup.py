@@ -18,9 +18,8 @@ setup(
     license="Apache License 2.0",
     tests_require=["pytest"],
     entry_points={
-        "console_scripts": [
-            "talker = py_pubsub.publisher_member_function:main",
-            "listener = py_pubsub.subscriber_member_function:main",
+        'console_scripts': [
+            'towel = stack_detect.towel_detector:main',
         ],
     },
 )

@@ -1,27 +1,52 @@
 """Subscriber module"""
+import cv2
 import rclpy
-from rclpy.node import Node
+import numpy as np
 
-from std_msgs.msg import String
+from rclpy.node import Node
+from cv_bridge import CvBridge 
+
+from sensor_msgs.msg import Image
+
+from stack_detect.detectors import ColorLineDetector, LINE_DEBUG_TYPE
 
 
 class TowelDetector(Node):
     """Subscriber node"""
 
     def __init__(self):
-        super().__init__("minimal_subscriber")
+        super().__init__("towel_detector")
+
+        self.declare_parameter("debug_img", False)
+        self.debug_img = self.get_parameter("debug_img").get_parameter_value().bool_value
+
         self.subscription = self.create_subscription(
-            String, "topic", self.listener_callback, 10
+            Image, "/video_in", self.listener_callback, 0
         )
+
+        if self.debug_img:
+            self.img_pub = self.create_publisher(Image, "debug_img", 10)
+
+        self.br = CvBridge()
+        self.ld = ColorLineDetector(debug_img_t=LINE_DEBUG_TYPE.RESULT, offset=(0, 0))
 
     def listener_callback(self, msg):
         """Callback function when message is received"""
-        self.get_logger().info(f'I heard: "{msg.data}"')
+        # self.get_logger().info(f'image size {msg.width}x{msg.height}')
+        cam_img = np.flipud(msg.data)
+
+        # detect stack and determine pixel-space errors
+        _, err, dbg_img = self.ld.detect(cv2.cvtColor(cam_img, cv2.COLOR_RGB2BGR))
+        print(dbg_img.dtype)
+
+        if self.debug_img: self.img_pub.publish(self.br.cv2_to_imgmsg(dbg_img, encoding="rgb8"))
 
 
 def main(args=None):
     """Creates subscriber node and spins it"""
     rclpy.init(args=args)
+
+    print(args)
 
     minimal_subscriber = TowelDetector()
 
