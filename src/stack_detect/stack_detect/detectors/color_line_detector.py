@@ -1,18 +1,13 @@
 import cv2 
 import numpy as np
 
-class LINE_DEBUG_TYPE:
-    ALL_STEPS=1
-    RESULT=2
-
 class ColorLineDetector:
 
-    def __init__(self, hue=330, hue_tol=0.06, sat_range=(40,255), debug_img_t=LINE_DEBUG_TYPE.ALL_STEPS, offset=(0,0)):
+    def __init__(self, hue=330, hue_tol=0.06, sat_range=(40,255), offset=(0,0)):
         self.hue = hue
         self.hue_tol = hue_tol
         self.offset = np.array(offset).astype(np.int16)
         self.sat_range = sat_range
-        self.debug_img_t = debug_img_t
 
     def detect(self, frame):
         # Step 1: filter for color (uses HSL space for better stability)
@@ -66,10 +61,10 @@ class ColorLineDetector:
             cv2.circle(final_img, center[::-1], 5, (0,255,0), 4)
             cv2.line(final_img, center[::-1], gripper_target[::-1], (122, 122, 122), 1)
 
-            return (center, gripper_target), (x_err, y_err), all_steps_img if self.debug_img_t==LINE_DEBUG_TYPE.ALL_STEPS else final_img
+            return (center, gripper_target), (x_err, y_err), (all_steps_img,  final_img)
         else:
             cv2.putText(final_img, f"-- no line found --", (20,440), 1, 2, (255, 50, 50), thickness=2)
-            return None, None, final_img
+            return None, None, (all_steps_img,  final_img)
 
     # tol in [0,1] is tolerance in percent
     def _filter_hue_color(self, img, tol=0.06):
