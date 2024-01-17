@@ -7,6 +7,7 @@ from rclpy.node import Node
 from cv_bridge import CvBridge 
 from rclpy.parameter import Parameter
 
+from std_msgs.msg import Int16MultiArray
 from sensor_msgs.msg import Image
 from rcl_interfaces.msg import SetParametersResult
 
@@ -39,6 +40,8 @@ class TowelDetector(Node):
             Image, "/video_in", self.listener_callback, 0
         )
 
+        self.err_pub = self.create_publisher(Int16MultiArray, 'line_img_error', 10)
+
         if self.debug_img:
             self.img_pub = self.create_publisher(Image, "debug_img", 10)
 
@@ -69,10 +72,12 @@ class TowelDetector(Node):
 
         # detect stack and determine pixel-space errors
         _, err, (all_img, final_img) = self.ld.detect(cam_img)
-        
+        if err is not None: self.err_pub.publish(Int16MultiArray(data=err))
+
         if self.debug_img:
             dbg_img = all_img if self.debug_img == "all" else final_img
 
+            # cv2 imshow for debugging
             # cv2.imshow("", dbg_img)
             # cv2.waitKey(50)
 
