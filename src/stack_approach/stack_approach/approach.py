@@ -84,14 +84,14 @@ def main(args=None):
     """Creates subscriber node and spins it"""
     rclpy.init(args=args)
 
-    towel_detector = TowelDetector()
+    minimal_subscriber = TowelDetector()
 
-    rclpy.spin(towel_detector)
+    rclpy.spin(minimal_subscriber)
 
     # Destroy the node explicitly
     # (optional - otherwise it will be done automatically
     # when the garbage collector destroys the node object)
-    towel_detector.destroy_node()
+    minimal_subscriber.destroy_node()
     rclpy.shutdown()
 
 

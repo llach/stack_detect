@@ -1,0 +1,101 @@
+<mujoco model="ur5-iri">
+  <compiler angle="radian" autolimits="true" meshdir="meshes/"/>
+  <size njmax="500" nconmax="100"/>
+  <option integrator="implicitfast"/>
+
+  <default>
+    <default class="visual">
+      <geom type="mesh" contype="0" conaffinity="0" group="2"/>
+    </default>
+
+    <joint armature="0.01" damping=".1" pos="0 0 0" axis="0 1 0" range="-6.283 6.283" limited="true" />
+    <general gaintype="fixed" biastype="affine" ctrlrange="-360 360" gainprm="100" biasprm="0 -5729.74 -572.97" forcerange="-150 150"/>
+
+    <default class="gripper">
+      <joint armature="0.01" damping=".1" pos="0 0 0" range="0 0.025" limited="true" />
+      <general dyntype="none" biastype="affine" forcerange="-10 10" ctrlrange="0 0.025" gainprm="100 0 0" biasprm="0 -100 -10" />
+    </default>
+  </default>
+
+  <asset>
+    <mesh name="base_structure" file="base_structure2.stl"     />
+    <mesh name="arm_base"       file="arm_base.stl"     />
+    <mesh name="shoulder"       file="shoulder.stl" />
+    <mesh name="upperarm"       file="upperarm.stl" />
+    <mesh name="forearm"        file="forearm.stl"  />
+    <mesh name="wrist1"         file="wrist1.stl"   />
+    <mesh name="wrist2"         file="wrist2.stl"   />
+    <mesh name="wrist3"         file="wrist3.stl"   />
+
+    <mesh name="hand-e" file="hand-e.stl" scale="0.001 0.001 0.001" />
+    <mesh name="hand-e_finger" file="hand-e_finger.STL" scale="-0.001 0.001 0.001"/>
+    <mesh name="hand-e_finger_cam" file="hand-e_finger_cam.STL" scale="0.001 0.001 0.001"/>
+
+    <material name="ur5_mat"     shininess="0.9" specular="0.75" reflectance="0.3"/>
+    <material name="gripper_mat" shininess="0.9" specular="0.75" reflectance="0.4"/>
+  </asset>
+
+  <contact>
+    <exclude body1="hand_base" body2="hande_left_finger" />
+    <exclude body1="hand_base" body2="hande_right_finger" />
+  </contact>
+
+  <worldbody>
+    <geom name="floor" size="0 0 .05" type="plane" material="grid" condim="3"/>
+    <light name="spotlight" mode="targetbodycom" target="base_structure" diffuse=".8 .8 .8" specular="0.3 0.3 0.3" pos="0 0 4" cutoff="30"/>
+
+    <body name="base_structure">
+      <inertial pos="0 0 0" mass="40" diaginertia="0.0072 0.00443333 0.00443333" />
+      <geom class="visual" mesh="base_structure" rgba="0.8 0.8 0.8 1" />
+
+      <geom type="cylinder" size="0.045 0.62" pos="0 0 0.76" rgba="0 0 0 0"/>
+      <geom type="cylinder" size="0.045 0.23" pos="0 0 1.405" quat="0 0 0.707 0.707" rgba="0 0 0 0"/>
+      <geom type="box" size="0.30 0.4 0.0025" pos="0.485 0 0.7875" rgba="0 0 0 0"/>
+      <geom type="box" size="0.335 0.02 0.02" pos="0.37 0 0.7675" rgba="0 0 0 0"/>
+
+      <include file="ur5.xml" />
+    </body>
+
+    <body name="lower_stack" pos="0.5 -0.25 0.840">
+      <inertial pos="0 0 0" mass="40" diaginertia="0.0072 0.00443333 0.00443333" />
+      <geom name="lower_stack" type="box" size="0.1 0.1 0.05" />
+    </body>
+
+    <body name="upper_stack" pos="0.5 -0.25 0.907">
+      <freejoint/>
+      <inertial pos="0 0 0" mass="40" diaginertia="0.0072 0.00443333 0.00443333" />
+      <geom name="upper_stack" type="box" size="0.1 0.1 0.015"  rgba="1 0.71 0.76 1"/>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <general name="shoulder_pan_joint"  joint="shoulder_pan_joint" />
+    <general name="shoulder_lift_joint" joint="shoulder_lift_joint" />
+    <general name="elbow_joint" joint="elbow_joint" />
+    <general name="wrist_1_joint" joint="wrist_1_joint" />
+    <general name="wrist_2_joint" joint="wrist_2_joint" />
+    <general name="wrist_3_joint" joint="wrist_3_joint" />
+
+    <general name="left_finger"  class="gripper" joint="left_finger" />
+    <general name="right_finger" class="gripper" joint="right_finger" />
+  </actuator>
+
+  <!-- scene visuals -->
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="120" elevation="-20"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1=".3 .5 .7" rgb2="0 0 0" width="32" height="512"/>
+    <texture name="body" type="cube" builtin="flat" mark="cross" width="128" height="128" rgb1="0.8 0.6 0.4" rgb2="0.8 0.6 0.4" markrgb="1 1 1" random="0.01"/>
+    <texture name="grid" type="2d" builtin="checker" width="512" height="512" rgb1=".1 .2 .3" rgb2=".2 .3 .4"/>
+    <material name="grid" texture="grid" texrepeat="1 1" texuniform="true" reflectance=".2"/>
+  </asset>
+
+  <keyframe>
+    <key name="home" qpos="-4.83 -0.75 1.56 -2.51 0.87 -3.01 0 0 0.5 -0.25 0.907 1 0 0 0" ctrl="-277 -41 90 -148 50 -170 0 0"/>
+    <key name="approach" qpos="1.50 -1.63 2.13 -2.19 -0.25 0 0 0 0.5 -0.25 0.907 1 0 0 0" ctrl="86 -93 122 -126 -14 0 0 0" />
+  </keyframe>
+</mujoco>

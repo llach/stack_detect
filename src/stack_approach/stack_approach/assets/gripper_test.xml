@@ -1,0 +1,50 @@
+<mujoco model="robotiq_hande">
+  <compiler angle="radian" autolimits="true" meshdir="meshes/" />
+
+  <default>
+    <default class="visual">
+      <geom type="mesh" contype="0" conaffinity="0" group="2"/>
+    </default>
+    <default class="gripper">
+      <joint armature="0.01" damping=".1" pos="0 0 0" range="0 0.025" limited="true" />
+      <general dyntype="none" biastype="affine" forcerange="-10 10" ctrlrange="0 0.025" gainprm="100 0 0" biasprm="0 -100 -10" />
+    </default>
+  </default>
+  
+  <asset>
+    <mesh name="hand-e" file="hand-e.stl" scale="0.001 0.001 0.001" />
+    <mesh name="hand-e_finger" file="hand-e_finger.stl" scale="-0.001 0.001 0.001"/>
+    <mesh name="hand-e_finger_cam" file="hand-e_finger_cam.stl" scale="0.001 0.001 0.001"/>
+  </asset>
+
+  <contact>
+    <exclude body1="hand_base" body2="hande_left_finger" />
+    <exclude body1="hand_base" body2="hande_right_finger" />
+  </contact>
+    
+  <worldbody>
+    <geom name="floor" size="0 0 .05" type="plane" material="grid" condim="3"/>
+    <light name="spotlight" mode="targetbodycom" target="hand_base" diffuse=".8 .8 .8" specular="0.3 0.3 0.3" pos="0 0 2" cutoff="30"/>
+
+    <include file="hand_e.xml" />
+  </worldbody>
+
+  <actuator>
+    <general name="left_finger"  class="gripper" joint="left_finger" />
+    <general name="right_finger" class="gripper" joint="right_finger" />
+  </actuator>
+
+  <!-- scene visuals -->
+  <visual>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="120" elevation="-20"/>
+  </visual>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1=".3 .5 .7" rgb2="0 0 0" width="32" height="512"/>
+    <texture name="body" type="cube" builtin="flat" mark="cross" width="128" height="128" rgb1="0.8 0.6 0.4" rgb2="0.8 0.6 0.4" markrgb="1 1 1" random="0.01"/>
+    <texture name="grid" type="2d" builtin="checker" width="512" height="512" rgb1=".1 .2 .3" rgb2=".2 .3 .4"/>
+    <material name="grid" texture="grid" texrepeat="1 1" texuniform="true" reflectance=".2"/>
+  </asset>
+</mujoco>
