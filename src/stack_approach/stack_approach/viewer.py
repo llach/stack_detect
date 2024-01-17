@@ -17,6 +17,7 @@ class MjViewer(Node):
     ik_steps = 1
     px_gain = 0.002
     max_dt = 0.5
+    max_dq = 0.005
 
     joint_names=[
         'shoulder_lift_joint', 
@@ -34,7 +35,7 @@ class MjViewer(Node):
         self.with_vis = with_vis
         self.rate = self.create_rate(rate)
 
-        self.current_q = {n: 0 for n in self.joint_names}
+        self.current_q = None
 
         # maximum age for messages
         self.last_update = rclpy.time.Time()
@@ -55,7 +56,7 @@ class MjViewer(Node):
         )
 
     def js_callback(self, msg): 
-        for jname, q in zip(msg.name, msg.position): self.current_q[jname]=q
+        self.current_q = {jname: q for jname, q in zip(msg.name, msg.position)}
 
     def err_cb(self, msg):
         self.last_update = self.get_clock().now()
@@ -63,9 +64,15 @@ class MjViewer(Node):
 
     def run(self):
         while rclpy.ok():
+            if self.current_q is None: continue
+
+            # update robot state, robot model (self.ur5) is using this state for fk and ik!
             self.rs.update_robot_state(self.current_q)
             if self.with_vis: self.rs.render()
 
+            #### 
+            ####    Safety checks
+            ####
             if self.img_error is None:
                 print("no image error received yet")
                 continue
@@ -88,7 +95,19 @@ class MjViewer(Node):
             Toff = tf.rotation_matrix(-1*np.sign(zGr[2])*zErr, [1,0,0])
             camGoal = T@trafo(t=[-self.px_gain*x_err,self.px_gain*y_err, 0])@Toff
 
-            self.rs.draw_goal(camGoal)
+            if self.with_vis: self.rs.draw_goal(camGoal)
+
+            # calculate IK. scaling orientation down improves accuracy in position
+            qdot, N = self.ur5.ik([
+                self.ur5.pose_task(camGoal, T, J, scale=(1, .6)),
+            ])
+
+            # clip deltaqs
+            qdot = np.clip(qdot, -self.max_dq, self.max_dq)
+            qdot = self.ur5.extract_q_subset(qdot, self.joint_names)
+
+            # calculate new qs
+            qnew = {n: self.current_q[n]+qdot[n] for n in self.joint_names}
           
             self.rate.sleep()
 

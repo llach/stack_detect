@@ -81,6 +81,10 @@ class RobotModel:
             q[i] = qdict[jnt.name]
         return q
     
+    def extract_q_subset(self, q, names):
+        q = self.make_qdict(q)
+        return {n: q[n] for n in names}
+    
     def disable_joint(self, jnt_name):
         jidx = self.joint_names.index(jnt_name)
         self.jnt_scale[jidx] = 0
