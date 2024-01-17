@@ -4,6 +4,7 @@ import rclpy
 from rclpy.node import Node
 import threading    
 
+from std_msgs.msg import Int16MultiArray
 from sensor_msgs.msg import JointState
 from stack_approach.robot_sim import RobotSim
 from stack_approach.ik.common import mj2quat
@@ -13,7 +14,7 @@ class MjViewer(Node):
 
     ik_steps = 1
     px_gain = 0.002
-    max_dt = 1
+    max_dt = 0.5
 
     joint_names=[
         'shoulder_lift_joint', 
@@ -26,12 +27,19 @@ class MjViewer(Node):
 
     def __init__(self, with_vis=True, rate=30):
         super().__init__("mj_viewer")
+        self.log = self.get_logger()
+
         self.with_vis = with_vis
         self.rate = self.create_rate(rate)
 
         self.current_q = {n: 0 for n in self.joint_names}
+
+        # maximum age for messages
         self.last_update = rclpy.time.Time()
         self.max_age = rclpy.duration.Duration(seconds=self.max_dt)
+
+        # set current image error to be uninitialized
+        self.img_error = None
 
         self.rs = RobotSim(with_vis=with_vis)
 
@@ -39,16 +47,30 @@ class MjViewer(Node):
             JointState, "/joint_states", self.js_callback, 0
         )
 
-    def js_callback(self, msg):
-        "update latest time and current joint values"
-        self.last_update = rclpy.time.Time.from_msg(msg.header.stamp)
+        self.subscription = self.create_subscription(
+            Int16MultiArray, "/line_img_error", self.err_cb, 0
+        )
+
+    def js_callback(self, msg): 
         for jname, q in zip(msg.name, msg.position): self.current_q[jname]=q
+
+    def err_cb(self, msg):
+        self.last_update = self.get_clock().now()
+        self.img_error = msg.data
 
     def run(self):
         while rclpy.ok():
             if self.with_vis: self.rs.step(self.current_q)
 
-            # print(self.get_clock().now()-self.last_update < self.max_age)            
+            if self.img_error is None:
+                print("no image error received yet")
+                continue
+
+            err_age = self.get_clock().now()-self.last_update
+            if err_age > self.max_age:
+                print(f"data too old ({err_age} > {self.max_age})")
+                continue
+          
             self.rate.sleep()
 
 def main(args=None):
