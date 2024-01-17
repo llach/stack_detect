@@ -10,6 +10,7 @@ from std_msgs.msg import Int16MultiArray
 from sensor_msgs.msg import JointState
 from stack_approach.robot_sim import RobotSim
 from stack_approach.ik.common import trafo
+from controller_manager import switch_controllers, list_controllers
 
 class MjViewer(Node):
     """Subscriber node"""
@@ -18,6 +19,9 @@ class MjViewer(Node):
     px_gain = 0.002
     max_dt = 0.5
     max_dq = 0.005
+
+    TRAJ_CTRL = "scaled_joint_trajectory_controller"
+    FRWRD_CTRL = "forward_position_controller"
 
     joint_names=[
         'shoulder_lift_joint', 
@@ -55,6 +59,36 @@ class MjViewer(Node):
             Int16MultiArray, "/line_img_error", self.err_cb, 0
         )
 
+        self.log.info("checking controllers ...")
+        lc = list_controllers(self, "controller_manager")
+        activate_controllers = []
+        deactivate_controllers = []
+        for c in lc.controller:
+            if c.name in [self.TRAJ_CTRL, self.FRWRD_CTRL]: self.log.info(f"{c.name}: {c.state}")
+
+            if c.name == self.FRWRD_CTRL and c.state != "active":
+                activate_controllers.append(self.FRWRD_CTRL)
+
+            if c.name == self.TRAJ_CTRL and c.state == "active":
+                deactivate_controllers.append(self.TRAJ_CTRL)
+
+        if len(activate_controllers) > 0 or len(deactivate_controllers) > 0:
+            self.log.info("switching controllers", activate_controllers, deactivate_controllers)
+            resp = switch_controllers(
+                self,
+                "controller_manager",
+                activate_controllers=activate_controllers,
+                deactivate_controllers=deactivate_controllers,
+                strict=True ,
+                activate_asap=False,
+                timeout=10.0
+            )
+            if not resp.ok: 
+                self.log.error("could not sweit")
+            self.log.info("switching successful!")
+
+        self.log.info("setup done")
+
     def js_callback(self, msg): 
         self.current_q = {jname: q for jname, q in zip(msg.name, msg.position)}
 
@@ -74,12 +108,12 @@ class MjViewer(Node):
             ####    Safety checks
             ####
             if self.img_error is None:
-                print("no image error received yet")
+                self.log.warn("no image error received yet")
                 continue
 
             err_age = self.get_clock().now()-self.last_update
             if err_age > self.max_age:
-                print(f"data too old ({err_age} > {self.max_age})")
+                self.log.warn(f"data too old ({err_age} > {self.max_age})")
                 continue
 
             #### 

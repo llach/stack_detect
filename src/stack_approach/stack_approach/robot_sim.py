@@ -56,7 +56,6 @@ class RobotSim:
         
     def __del__(self):
         if hasattr(self, "viewer"): self.viewer.close()
-        super().__del__()
 
     def update_robot_state(self, q):
         for name, qi in q.items():
