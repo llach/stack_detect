@@ -6,6 +6,9 @@ import numpy as np
 import tf_transformations as tf
 
 from rclpy.node import Node
+from rclpy.executors import MultiThreadedExecutor
+# from rclpy.parameter_client import AsyncParameterClient
+from rcl_interfaces.srv import GetParameters
 from std_msgs.msg import Int16MultiArray
 from sensor_msgs.msg import JointState
 from stack_approach.robot_sim import RobotSim
@@ -22,15 +25,6 @@ class MjViewer(Node):
 
     TRAJ_CTRL = "scaled_joint_trajectory_controller"
     FRWRD_CTRL = "forward_position_controller"
-
-    joint_names=[
-        'shoulder_lift_joint', 
-        'elbow_joint', 
-        'wrist_1_joint', 
-        'wrist_2_joint', 
-        'wrist_3_joint', 
-        'shoulder_pan_joint'
-    ]
 
     def __init__(self, with_vis=True, rate=30):
         super().__init__("mj_viewer")
@@ -87,6 +81,19 @@ class MjViewer(Node):
                 self.log.error("could not sweit")
             self.log.info("switching successful!")
 
+        self.log.info("getting controller joints")
+        self.param_client = self.create_client(GetParameters, f"/{self.FRWRD_CTRL}/get_parameters")
+
+        request = GetParameters.Request()
+        request.names = ["joints"]
+        prm_future = self.param_client.call_async(request)
+
+        rclpy.spin_until_future_complete(self, prm_future)
+
+        self.joint_names = prm_future.result().values[0].string_array_value
+        self.log.info("got joints:")
+        for j in self.joint_names: self.log.info(f"\t- {j}")
+
         self.log.info("setup done")
 
     def js_callback(self, msg): 
@@ -97,6 +104,8 @@ class MjViewer(Node):
         self.img_error = msg.data
 
     def run(self):
+        
+        
         while rclpy.ok():
             if self.current_q is None: continue
 
@@ -140,8 +149,13 @@ class MjViewer(Node):
             qdot = np.clip(qdot, -self.max_dq, self.max_dq)
             qdot = self.ur5.extract_q_subset(qdot, self.joint_names)
 
-            # calculate new qs
-            qnew = {n: self.current_q[n]+qdot[n] for n in self.joint_names}
+            # calculate new qs, respect joint limits
+            qnew = {n: np.clip(self.current_q[n]+qdot[n], -self.rs.qmax, self.rs.qmax) for n in self.joint_names}
+
+            # print("now", self.current_q)
+            # print("qd ", qdot)
+            # print("new", qnew)
+            # print()
           
             self.rate.sleep()
 
@@ -151,7 +165,10 @@ def main(args=None):
 
     mj_viewer = MjViewer()
 
-    thread = threading.Thread(target=rclpy.spin, args=(mj_viewer, ), daemon=True)
+    executor = MultiThreadedExecutor()
+    executor.add_node(mj_viewer)
+
+    thread = threading.Thread(target=executor.spin, daemon=True)
     thread.start()
 
     mj_viewer.run()
