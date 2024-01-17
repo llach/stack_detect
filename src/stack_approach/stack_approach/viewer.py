@@ -1,13 +1,15 @@
 """Subscriber module"""
 import rclpy
-
-from rclpy.node import Node
 import threading    
 
+import numpy as np
+import tf_transformations as tf
+
+from rclpy.node import Node
 from std_msgs.msg import Int16MultiArray
 from sensor_msgs.msg import JointState
 from stack_approach.robot_sim import RobotSim
-from stack_approach.ik.common import mj2quat
+from stack_approach.ik.common import trafo
 
 class MjViewer(Node):
     """Subscriber node"""
@@ -42,6 +44,7 @@ class MjViewer(Node):
         self.img_error = None
 
         self.rs = RobotSim(with_vis=with_vis)
+        self.ur5 = self.rs.ur5
 
         self.subscription = self.create_subscription(
             JointState, "/joint_states", self.js_callback, 0
@@ -60,7 +63,8 @@ class MjViewer(Node):
 
     def run(self):
         while rclpy.ok():
-            if self.with_vis: self.rs.step(self.current_q)
+            self.rs.update_robot_state(self.current_q)
+            if self.with_vis: self.rs.render()
 
             if self.img_error is None:
                 print("no image error received yet")
@@ -70,6 +74,21 @@ class MjViewer(Node):
             if err_age > self.max_age:
                 print(f"data too old ({err_age} > {self.max_age})")
                 continue
+
+            #### 
+            ####    Motion generation
+            ####
+
+            T, J, Ts = self.ur5.fk(fk_type="space")
+            (x_err, y_err) = self.img_error
+
+            zGr = T[:3,:3]@[0,0,-1] # project z (or -z) in gripper frame
+            zErr = np.arcsin( np.abs(np.dot(zGr, [0,0,1])) / (np.linalg.norm(zGr)*np.linalg.norm([0,0,1])))
+                    
+            Toff = tf.rotation_matrix(-1*np.sign(zGr[2])*zErr, [1,0,0])
+            camGoal = T@trafo(t=[-self.px_gain*x_err,self.px_gain*y_err, 0])@Toff
+
+            self.rs.draw_goal(camGoal)
           
             self.rate.sleep()
 

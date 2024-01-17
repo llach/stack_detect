@@ -3,6 +3,7 @@ import mujoco_viewer
 import stack_approach
 
 from stack_approach.ik.joint import JointType as JT
+from stack_approach.ik.common import add_frame_marker, mj2quat
 from stack_approach.ik.robot_model import RobotModel
 
 class RobotSim:
@@ -35,13 +36,13 @@ class RobotSim:
         ]
 
         # TODO publish this frame (maybe tune it also)
-        # cam = self.rs.model.camera(0)
-        # camera_frame = [
-        #     cam.name,
-        #     cam.pos,
-        #     mj2quat(cam.quat)
-        # ]
-        self.ur5 = RobotModel(self.model, self.data, links=links)#, tip_frame=camera_frame)
+        cam = self.model.camera(0)
+        camera_frame = [
+            cam.name,
+            cam.pos,
+            mj2quat(cam.quat)
+        ]
+        self.ur5 = RobotModel(self.model, self.data, links=links, tip_frame=camera_frame)
 
         if self.with_vis:
             viewer = mujoco_viewer.MujocoViewer(self.model, self.data)
@@ -54,13 +55,21 @@ class RobotSim:
             self.viewer = viewer
         
     def __del__(self):
-        self.viewer.close()
+        if hasattr(self, "viewer"): self.viewer.close()
         super().__del__()
 
-    def step(self, q=None):
-        if q:
-            for name, qi in q.items():
+    def update_robot_state(self, q):
+        for name, qi in q.items():
                self.data.joint(name).qpos = qi
-
         mj.mj_step(self.model, self.data)
-        if self.with_vis: self.viewer.render()
+
+    def draw_goal(self, goal): 
+        if self.with_vis and hasattr(self, "viewer"):
+            add_frame_marker(goal, viewer=self.viewer, label="GOAL", scale=1, alpha=1)
+
+    def render(self):
+        if self.with_vis:
+            T, _, Ts = self.ur5.fk(fk_type="space")
+            for name, T in Ts.items():
+                add_frame_marker(T, viewer=self.viewer, label=name, scale=0.3, alpha=0.5)
+        self.viewer.render()
