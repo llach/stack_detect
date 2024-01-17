@@ -7,9 +7,8 @@ import tf_transformations as tf
 
 from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
-# from rclpy.parameter_client import AsyncParameterClient
 from rcl_interfaces.srv import GetParameters
-from std_msgs.msg import Int16MultiArray
+from std_msgs.msg import Int16MultiArray, Float64MultiArray
 from sensor_msgs.msg import JointState
 from stack_approach.robot_sim import RobotSim
 from stack_approach.ik.common import trafo
@@ -53,6 +52,8 @@ class MjViewer(Node):
             Int16MultiArray, "/line_img_error", self.err_cb, 0
         )
 
+        self.qpub = self.create_publisher(Float64MultiArray, f'/{self.FRWRD_CTRL}/commands', 10)
+
         self.log.info("checking controllers ...")
         lc = list_controllers(self, "controller_manager")
         activate_controllers = []
@@ -82,15 +83,13 @@ class MjViewer(Node):
             self.log.info("switching successful!")
 
         self.log.info("getting controller joints")
-        self.param_client = self.create_client(GetParameters, f"/{self.FRWRD_CTRL}/get_parameters")
 
-        request = GetParameters.Request()
-        request.names = ["joints"]
-        prm_future = self.param_client.call_async(request)
+        self.param_client = self.create_client(GetParameters, f"/{self.FRWRD_CTRL}/get_parameters")
+        prm_future = self.param_client.call_async(GetParameters.Request(names=["joints"]))
 
         rclpy.spin_until_future_complete(self, prm_future)
-
         self.joint_names = prm_future.result().values[0].string_array_value
+
         self.log.info("got joints:")
         for j in self.joint_names: self.log.info(f"\t- {j}")
 
@@ -128,7 +127,6 @@ class MjViewer(Node):
             #### 
             ####    Motion generation
             ####
-
             T, J, Ts = self.ur5.fk(fk_type="space")
             (x_err, y_err) = self.img_error
 
@@ -152,10 +150,12 @@ class MjViewer(Node):
             # calculate new qs, respect joint limits
             qnew = {n: np.clip(self.current_q[n]+qdot[n], -self.rs.qmax, self.rs.qmax) for n in self.joint_names}
 
-            # print("now", self.current_q)
-            # print("qd ", qdot)
-            # print("new", qnew)
-            # print()
+            print("now", self.current_q)
+            print("qd ", qdot)
+            print("new", qnew)
+            print()
+
+            self.qpub.publish(Float64MultiArray(data=list(qnew.values())))
           
             self.rate.sleep()
 
