@@ -33,7 +33,7 @@ class MjViewer(Node):
     TRAJ_CTRL = "scaled_joint_trajectory_controller"
     FRWRD_CTRL = "forward_position_controller"
 
-    def __init__(self, with_vis=True, rate=10, ctrl_mode=CtrlMode.TRAJ):
+    def __init__(self, with_vis=True, rate=1, ctrl_mode=CtrlMode.TRAJ):
         super().__init__("mj_viewer")
         self.log = self.get_logger()
 
@@ -101,7 +101,7 @@ class MjViewer(Node):
                 "controller_manager",
                 activate_controllers=activate_controllers,
                 deactivate_controllers=deactivate_controllers,
-                strict=True ,
+                strict=True,
                 activate_asap=False,
                 timeout=10.0
             )
@@ -122,6 +122,8 @@ class MjViewer(Node):
 
         self.log.info("setup done")
 
+        self.timer = self.create_timer(1/rate, self.run, callback_group=self.cb_group)
+
     def js_callback(self, msg): 
         self.current_q = {jname: q for jname, q in zip(msg.name, msg.position)}
 
@@ -132,115 +134,112 @@ class MjViewer(Node):
     def send_trajectory(self, q): pass
 
     def run(self):
-        if self.ctrl_mode == CtrlMode.TRAJ:
-            self.log.info("waiting for trajectory action server")
-            self.traj_client.wait_for_server()
-            self.log.info("found action server!")
+        # if self.ctrl_mode == CtrlMode.TRAJ:
+        #     self.log.info("waiting for trajectory action server")
+        #     self.traj_client.wait_for_server()
+        #     self.log.info("found action server!")
 
-        try:
-            while rclpy.ok():
-                if self.current_q is None: 
-                    self.log.warn("no current joint state")
-                    continue
+        if self.current_q is None: 
+            self.log.warn("no current joint state")
+            return
 
-                # update robot state, robot model (self.ur5) is using this state for fk and ik!
-                self.rs.update_robot_state(self.current_q)
-                if self.with_vis: self.rs.render()
-                print("hi1")
+        # update robot state, robot model (self.ur5) is using this state for fk and ik!
+        self.rs.update_robot_state(self.current_q)
+        if self.with_vis: self.rs.render()
 
-                #### 
-                ####    Safety checks
-                ####
-                if self.img_error is None:
-                    self.log.warn("no image error received yet")
-                    continue
+        #### 
+        ####    Safety checks
+        ####
+        if self.img_error is None:
+            self.log.warn("no image error received yet")
+            return
 
-                err_age = self.get_clock().now()-self.last_update
-                if err_age > self.max_age:
-                    self.log.warn(f"data too old ({err_age} > {self.max_age})")
-                    continue
+        err_age = self.get_clock().now()-self.last_update
+        if err_age > self.max_age:
+            self.log.warn(f"data too old ({err_age} > {self.max_age})")
+            return
 
-                #### 
-                ####    Motion generation
-                ####
-                T, J, Ts = self.ur5.fk(fk_type="space")
-                (x_err, y_err) = self.img_error
+        #### 
+        ####    Motion generation
+        ####
+        T, J, Ts = self.ur5.fk(fk_type="space")
+        (x_err, y_err) = self.img_error
 
-                zGr = T[:3,:3]@[0,0,-1] # project z (or -z) in gripper frame
-                zErr = np.arcsin( np.abs(np.dot(zGr, [0,0,1])) / (np.linalg.norm(zGr)*np.linalg.norm([0,0,1])))
-                        
-                Toff = tf.rotation_matrix(-1*np.sign(zGr[2])*zErr, [1,0,0])
+        zGr = T[:3,:3]@[0,0,-1] # project z (or -z) in gripper frame
+        zErr = np.arcsin( np.abs(np.dot(zGr, [0,0,1])) / (np.linalg.norm(zGr)*np.linalg.norm([0,0,1])))
+                
+        Toff = tf.rotation_matrix(-1*np.sign(zGr[2])*zErr, [1,0,0])
 
 
-                # camGoal = T@trafo(t=[-self.px_gain*x_err,self.px_gain*y_err, 0])#@Toff
-                camGoal = T@Toff
+        # camGoal = T@trafo(t=[-self.px_gain*x_err,self.px_gain*y_err, 0])#@Toff
+        camGoal = T@Toff
 
-                if self.with_vis: self.rs.draw_goal(camGoal)
+        if self.with_vis: self.rs.draw_goal(camGoal)
 
-                # calculate IK. scaling orientation down improves accuracy in position
-                qdot, N = self.ur5.ik([
-                    self.ur5.pose_task(camGoal, T, J, scale=(1, .6)),
-                ])
+        # calculate IK. scaling orientation down improves accuracy in position
+        qdot, N = self.ur5.ik([
+            self.ur5.pose_task(camGoal, T, J, scale=(1, .6)),
+        ])
 
-                # clip deltaqs
-                # qdot = np.clip(qdot, -self.max_dq, self.max_dq)
-                qdot = self.ur5.extract_q_subset(qdot, self.joint_names)
+        # clip deltaqs
+        # qdot = np.clip(qdot, -self.max_dq, self.max_dq)
+        qdot = self.ur5.extract_q_subset(qdot, self.joint_names)
 
-                # calculate new qs, respect joint limits
-                qnew = {n: np.clip(self.current_q[n]+qdot[n], -self.rs.qmax, self.rs.qmax) for n in self.joint_names}
+        # calculate new qs, respect joint limits
+        qnew = {n: np.clip(self.current_q[n]+qdot[n], -self.rs.qmax, self.rs.qmax) for n in self.joint_names}
 
-                # print("now", self.current_q)
-                # print("qd ", qdot)
-                # print("new", qnew)
-                # print()
+        # print("now", self.current_q)
+        # print("qd ", qdot)
+        # print("new", qnew)
+        # print()
 
-                if self.ctrl_mode == CtrlMode.FRWRD: self.qpub.publish(Float64MultiArray(data=list(qnew.values())))
-                elif self.ctrl_mode == CtrlMode.TRAJ: 
-                    traj_goal = FollowJointTrajectory.Goal()
-                    traj_goal.trajectory = JointTrajectory(
-                        joint_names=self.joint_names,
-                        points=[
-                            JointTrajectoryPoint(
-                                positions=list(qnew.values()),
-                                time_from_start=rclpy.duration.Duration(seconds=10).to_msg()
-                            )
-                        ]
+        if self.ctrl_mode == CtrlMode.FRWRD: self.qpub.publish(Float64MultiArray(data=list(qnew.values())))
+        elif self.ctrl_mode == CtrlMode.TRAJ: 
+            traj_goal = FollowJointTrajectory.Goal()
+            traj_goal.trajectory = JointTrajectory(
+                joint_names=self.joint_names,
+                points=[
+                    JointTrajectoryPoint(
+                        positions=list(qnew.values()),
+                        time_from_start=rclpy.duration.Duration(seconds=10).to_msg()
                     )
-                    print("hi")
-                    fut = self.traj_client.send_goal_async(traj_goal)
-                    rclpy.spin_until_future_complete(self, fut)
-                    self.current_goal = fut.result()
-                    print(self.current_goal)
-                    print("hi2")
-            
-                self.rate.sleep()
-                print("hi3")
-
-        except KeyboardInterrupt:
-            print("shutting down ...")
-            del self.rs
-            if self.ctrl_mode == CtrlMode.TRAJ and self.current_goal is not None:
-                print("cancelling goal ...")
-                self.current_goal.cancel_goal()
-                print("done")
+                ]
+            )
+            self.current_goal = self.traj_client.send_goal_async(traj_goal)
+        # except KeyboardInterrupt:
+        #     print("shutting down ...")
+        #     del self.rs
+        #     if self.ctrl_mode == CtrlMode.TRAJ and self.current_goal is not None:
+        #         print("cancelling goal ...")
+        #         self.current_goal.cancel_goal()
+        #         print("done")
 
 def main(args=None):
     """Creates subscriber node and spins it"""
     rclpy.init(args=args)
 
-    mj_viewer = MjViewer()
+    node = MjViewer()
 
-    executor = MultiThreadedExecutor()
+    executor = MultiThreadedExecutor(num_threads=4)
+    executor.add_node(node)
 
-    thread = threading.Thread(target=executor.spin, daemon=True)
-    thread.start()
+    try:
+        node.get_logger().info('Beginning client, shut down with CTRL-C')
+        rclpy.spin(node, executor)
+    except KeyboardInterrupt:
+        node.get_logger().info('Keyboard interrupt, shutting down.\n')
+        node.timer.cancel()
 
-    mj_viewer.run()
+        if node.ctrl_mode == CtrlMode.TRAJ and node.current_goal is not None:
+                print("cancelling goal ...")
+                rclpy.spin_until_future_complete(node, node.current_goal, executor)
+                node.current_goal.result().cancel_goal_async()
+                print("done")
 
     # Destroy the node explicitly
     # (optional - otherwise it will be done automatically
     # when the garbage collector destroys the node object)
-    mj_viewer.destroy_node()
+    node.destroy_node()
     if rclpy.ok(): rclpy.shutdown()
 
 
