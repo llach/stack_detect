@@ -1,4 +1,6 @@
+import time
 import mujoco as mj
+import threading
 import mujoco_viewer
 import stack_approach
 
@@ -13,6 +15,7 @@ class RobotSim:
 
     def __init__(self, with_vis=False) -> None:
         self.with_vis = with_vis
+        self.thread_active = False
         
         self.model = mj.MjModel.from_xml_path(f"{stack_approach.__path__[0]}/assets/ur5_test.xml")
         self.data = mj.MjData(self.model)
@@ -53,9 +56,16 @@ class RobotSim:
             viewer.cam.lookat       = [-0.04420583, -0.06552254,  0.84811352]
 
             self.viewer = viewer
+
+            # self.viewer_thread = threading.Thread(target=self.run_viewer)
+            # self.viewer_thread.start()
         
     def __del__(self):
-        if hasattr(self, "viewer"): self.viewer.close()
+        if hasattr(self, "viewer"): 
+            if self.thread_active:
+                self.thread_active = False
+                self.viewer_thread.join()
+            self.viewer.close()
 
     def update_robot_state(self, q):
         for name, qi in q.items():
@@ -73,3 +83,14 @@ class RobotSim:
             for name, T in Ts.items():
                 add_frame_marker(T, viewer=self.viewer, label=name, scale=0.3, alpha=0.5)
         self.viewer.render()
+
+    def run_viewer(self):
+        self.thread_active = True
+        while self.thread_active:
+            print("hey2")
+            T, _, Ts = self.ur5.fk(fk_type="space")
+            for name, T in Ts.items():
+                add_frame_marker(T, viewer=self.viewer, label=name, scale=0.3, alpha=0.5)
+
+            self.viewer.render()
+            time.sleep(0.1)
