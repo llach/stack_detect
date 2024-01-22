@@ -33,7 +33,7 @@ class MjViewer(Node):
     TRAJ_CTRL = "scaled_joint_trajectory_controller"
     FRWRD_CTRL = "forward_position_controller"
 
-    def __init__(self, with_vis=True, rate=1, ctrl_mode=CtrlMode.TRAJ):
+    def __init__(self, with_vis=True, rate=30, ctrl_mode=CtrlMode.TRAJ):
         super().__init__("mj_viewer")
         self.log = self.get_logger()
 
@@ -78,6 +78,10 @@ class MjViewer(Node):
 
             be_active = self.TRAJ_CTRL 
             be_inactive = self.FRWRD_CTRL
+
+            self.log.info("waiting for trajectory action server")
+            self.traj_client.wait_for_server()
+            self.log.info("found action server!")
         else:
             assert False, f"unknown control mode {self.ctrl_mode}"
 
@@ -134,11 +138,6 @@ class MjViewer(Node):
     def send_trajectory(self, q): pass
 
     def run(self):
-        # if self.ctrl_mode == CtrlMode.TRAJ:
-        #     self.log.info("waiting for trajectory action server")
-        #     self.traj_client.wait_for_server()
-        #     self.log.info("found action server!")
-
         if self.current_q is None: 
             self.log.warn("no current joint state")
             return
@@ -167,6 +166,7 @@ class MjViewer(Node):
 
         zGr = T[:3,:3]@[0,0,-1] # project z (or -z) in gripper frame
         zErr = np.arcsin( np.abs(np.dot(zGr, [0,0,1])) / (np.linalg.norm(zGr)*np.linalg.norm([0,0,1])))
+        print(zErr)
                 
         Toff = tf.rotation_matrix(-1*np.sign(zGr[2])*zErr, [1,0,0])
 
@@ -181,6 +181,7 @@ class MjViewer(Node):
             self.ur5.pose_task(camGoal, T, J, scale=(1, .6)),
         ])
 
+        print(qdot)
         # clip deltaqs
         # qdot = np.clip(qdot, -self.max_dq, self.max_dq)
         qdot = self.ur5.extract_q_subset(qdot, self.joint_names)
@@ -188,10 +189,10 @@ class MjViewer(Node):
         # calculate new qs, respect joint limits
         qnew = {n: np.clip(self.current_q[n]+qdot[n], -self.rs.qmax, self.rs.qmax) for n in self.joint_names}
 
-        # print("now", self.current_q)
-        # print("qd ", qdot)
-        # print("new", qnew)
-        # print()
+        print("now", self.current_q)
+        print("qd ", qdot)
+        print("new", qnew)
+        print()
 
         if self.ctrl_mode == CtrlMode.FRWRD: self.qpub.publish(Float64MultiArray(data=list(qnew.values())))
         elif self.ctrl_mode == CtrlMode.TRAJ: 
@@ -201,7 +202,7 @@ class MjViewer(Node):
                 points=[
                     JointTrajectoryPoint(
                         positions=list(qnew.values()),
-                        time_from_start=rclpy.duration.Duration(seconds=10).to_msg()
+                        time_from_start=rclpy.duration.Duration(seconds=5).to_msg()
                     )
                 ]
             )

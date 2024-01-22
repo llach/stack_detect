@@ -68,6 +68,7 @@ class RobotSim:
 
     def render(self):
         if self.with_vis:
+            print("hey")
             T, _, Ts = self.ur5.fk(fk_type="space")
             for name, T in Ts.items():
                 add_frame_marker(T, viewer=self.viewer, label=name, scale=0.3, alpha=0.5)
