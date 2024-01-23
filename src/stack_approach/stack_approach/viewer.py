@@ -8,7 +8,7 @@ import tf_transformations as tf
 from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
 from rcl_interfaces.srv import GetParameters
-from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallbackGroup
 from rclpy.action import ActionClient
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from control_msgs.action import FollowJointTrajectory
@@ -17,10 +17,17 @@ from sensor_msgs.msg import JointState
 from stack_approach.robot_sim import RobotSim
 from stack_approach.ik.common import trafo
 from controller_manager import switch_controllers, list_controllers
+from collections import deque
 
 class CtrlMode:
     TRAJ=0
     FRWRD=1
+
+class CtrlPhase:
+    CORRETION=1
+    APPROACH=2
+    INSERTION=3
+    LIFT=4
 
 class MjViewer(Node):
     """Subscriber node"""
@@ -33,9 +40,10 @@ class MjViewer(Node):
     TRAJ_CTRL = "scaled_joint_trajectory_controller"
     FRWRD_CTRL = "forward_position_controller"
 
-    def __init__(self, with_vis=False, rate=0.5, ctrl_mode=CtrlMode.TRAJ):
+    def __init__(self, with_vis=False, rate=5, ctrl_mode=CtrlMode.TRAJ, executor=None):
         super().__init__("mj_viewer")
         self.log = self.get_logger()
+        self.executor = executor
 
         self.with_vis = with_vis
         self.rate = self.create_rate(rate)
@@ -58,11 +66,11 @@ class MjViewer(Node):
         self.ur5 = self.rs.ur5
 
         self.subscription = self.create_subscription(
-            JointState, "/joint_states", self.js_callback, 0
+            JointState, "/joint_states", self.js_callback, 0, callback_group=self.cb_group
         )
 
         self.subscription = self.create_subscription(
-            Int16MultiArray, "/line_img_error", self.err_cb, 0
+            Int16MultiArray, "/line_img_error", self.err_cb, 0, callback_group=self.cb_group
         )
 
         self.err_pub = self.create_publisher(
@@ -70,7 +78,7 @@ class MjViewer(Node):
         )
 
         if self.ctrl_mode == CtrlMode.FRWRD:
-            self.qpub = self.create_publisher(Float64MultiArray, f'/{self.FRWRD_CTRL}/commands', 10)
+            self.qpub = self.create_publisher(Float64MultiArray, f'/{self.FRWRD_CTRL}/commands', 10, callback_group=self.cb_group)
             be_active = self.FRWRD_CTRL
             be_inactive = self.TRAJ_CTRL
         elif self.ctrl_mode == CtrlMode.TRAJ:
@@ -132,7 +140,14 @@ class MjViewer(Node):
 
         self.log.info("setup done")
 
-        self.timer = self.create_timer(1/rate, self.run, callback_group=self.cb_group)
+        self.timer = self.create_timer(1/rate, self.run, callback_group=ReentrantCallbackGroup())
+
+        self.win_length = 10
+        self.img_errors = deque(maxlen=5)
+        self.img_error_deltas = deque(maxlen=5)
+        self.zErrs = deque(maxlen=5)
+
+        self.phase = CtrlPhase.CORRETION
 
     def js_callback(self, msg): 
         self.current_q = {jname: q for jname, q in zip(msg.name, msg.position)}
@@ -148,9 +163,73 @@ class MjViewer(Node):
 
         self.err_pub.publish(Int16MultiArray(data=self.img_error_delta))
 
-    def send_trajectory(self, q): pass
+    def create_traj(self, qfinal, time):
+        traj_goal = FollowJointTrajectory.Goal()
+        traj_goal.trajectory = JointTrajectory(
+            joint_names=self.joint_names,
+            points=[
+                JointTrajectoryPoint(
+                    positions=list(qfinal.values()),
+                    time_from_start=rclpy.duration.Duration(seconds=time).to_msg()
+                )
+            ]
+        )
+        return traj_goal
+    
+    def cancel_goal(self, g):
+        self.log.info("canceling goal ...")
+        rclpy.spin_until_future_complete(self, g, executor=self.executor)
+        gh = g.result()
+        cancel_fut = gh.cancel_goal_async()
+        rclpy.spin_until_future_complete(self, cancel_fut, executor=self.executor)
 
-    def goal_response_callback(self, future): self.gh = future.result()
+        self.log.info("goal canceled")
+
+    def solve_IK(self, goal, T, J, scale=[1,1]):
+          # calculate IK. scaling orientation down improves accuracy in position
+        qdot, N = self.ur5.ik([
+            self.ur5.pose_task(goal, T, J, scale=scale),
+        ])
+
+        # clip deltaqs
+        # qdot = np.clip(qdot, -self.max_dq, self.max_dq)
+        qdot = self.ur5.extract_q_subset(qdot, self.joint_names)
+
+        # calculate new qs, respect joint limits
+        qnew = {n: np.clip(self.current_q[n]+qdot[n], -self.rs.qmax, self.rs.qmax) for n in self.joint_names}
+
+        # print("now", self.current_q)
+        # print("qd ", qdot)
+        # print("new", qnew)
+        # print()
+
+        return qnew
+    
+    def insertion(self):
+        self.log.info("going up")
+
+        self.rs.update_robot_state(self.current_q)
+        T, J, Ts = self.ur5.fk(fk_type="space")
+        Tgoal = trafo(t=[0,0,0.005])@T
+
+        qnew = self.solve_IK(Tgoal, T, J)
+        g = self.traj_client.send_goal_async(
+            self.create_traj(qfinal=qnew, time=2)
+        )
+        rclpy.spin_until_future_complete(self, g, executor=self.executor)
+        self.log.info("inserting")
+
+        self.rs.update_robot_state(self.current_q)
+        T, J, Ts = self.ur5.fk(fk_type="space")
+        Tgoal = T@trafo(t=[0,0,-0.05])
+
+        qnew = self.solve_IK(Tgoal, T, J)
+        g = self.traj_client.send_goal_async(
+            self.create_traj(qfinal=qnew, time=6)
+        )
+        rclpy.spin_until_future_complete(self, g, executor=self.executor)
+
+        self.log.info("movement done")
 
     def run(self):
         if self.current_q is None: 
@@ -173,6 +252,11 @@ class MjViewer(Node):
             self.log.warn(f"data too old ({err_age} > {self.max_age})")
             return
 
+        # insertion phase is handled synchronously, so don't spin up more timers
+        if self.phase == CtrlPhase.INSERTION:
+            self.log.info("in insertion phase, skipping timer callback")
+            return
+        
         #### 
         ####    Motion generation
         ####
@@ -181,52 +265,48 @@ class MjViewer(Node):
 
         zGr = T[:3,:3]@[0,0,-1] # project z (or -z) in gripper frame
         zErr = np.arcsin( np.abs(np.dot(zGr, [0,0,1])) / (np.linalg.norm(zGr)*np.linalg.norm([0,0,1])))
-        print(zErr)
+
+        self.zErrs.append(zErr)
+        self.img_errors.append(self.img_error)
+        self.img_error_deltas.append(self.img_error_delta)
+
+        if self.phase == CtrlPhase.CORRETION:
+            if np.all(np.abs(self.img_errors)<7) and np.all(np.array(self.zErrs)<0.05):
+                self.log.info("TRANSITION TO APPROACH")
+                self.phase = CtrlPhase.APPROACH
+
+        if self.phase == CtrlPhase.APPROACH:
+            if np.any(np.abs(self.img_errors)>10) and np.any(np.abs(self.img_error_deltas)>10):
+                """ due to the confusing ROS2 threading model, we cancel the timer here and do everything synchronously
+                """
+                self.log.info("TRANSITION TO INSERTION")
+                self.phase == CtrlPhase.INSERTION
+                self.timer.destroy()
+
+                self.cancel_goal(self.current_goal)
+                self.insertion()
                 
         Toff = tf.rotation_matrix(-1*np.sign(zGr[2])*zErr, [1,0,0])
         camGoal = T@trafo(t=[-self.px_gain*x_err,self.px_gain*y_err, -0.05])@Toff
 
         # if self.with_vis: self.rs.draw_goal(camGoal)
 
-        # calculate IK. scaling orientation down improves accuracy in position
-        qdot, N = self.ur5.ik([
-            self.ur5.pose_task(camGoal, T, J, scale=(1, .6)),
-        ])
-
-        # clip deltaqs
-        # qdot = np.clip(qdot, -self.max_dq, self.max_dq)
-        qdot = self.ur5.extract_q_subset(qdot, self.joint_names)
-
-        # calculate new qs, respect joint limits
-        qnew = {n: np.clip(self.current_q[n]+qdot[n], -self.rs.qmax, self.rs.qmax) for n in self.joint_names}
-
-        # print("now", self.current_q)
-        # print("qd ", qdot)
-        # print("new", qnew)
-        # print()
+        qnew = self.solve_IK(camGoal, T, J, scale=(1, .6))
 
         if self.ctrl_mode == CtrlMode.FRWRD: self.qpub.publish(Float64MultiArray(data=list(qnew.values())))
         elif self.ctrl_mode == CtrlMode.TRAJ: 
-            traj_goal = FollowJointTrajectory.Goal()
-            traj_goal.trajectory = JointTrajectory(
-                joint_names=self.joint_names,
-                points=[
-                    JointTrajectoryPoint(
-                        positions=list(qnew.values()),
-                        time_from_start=rclpy.duration.Duration(seconds=3).to_msg()
-                    )
-                ]
+            self.current_goal = self.traj_client.send_goal_async(
+                self.create_traj(qfinal=qnew, time=3 if self.phase == CtrlPhase.CORRETION else 2)
             )
-            self.current_goal = self.traj_client.send_goal_async(traj_goal)
-            self.current_goal.add_done_callback(self.goal_response_callback)
-
+           
+            
 def main(args=None):
     """Creates subscriber node and spins it"""
     rclpy.init(args=args)
 
-    node = MjViewer()
+    executor = MultiThreadedExecutor(num_threads=8)
+    node = MjViewer(executor=executor)
 
-    executor = MultiThreadedExecutor(num_threads=4)
     executor.add_node(node)
 
     try:
@@ -234,19 +314,16 @@ def main(args=None):
         rclpy.spin(node, executor)
     except KeyboardInterrupt:
         node.get_logger().info('Keyboard interrupt, shutting down.\n')
-        node.timer.cancel()
+        node.timer.destroy()
         del node.rs
 
         if node.ctrl_mode == CtrlMode.TRAJ and node.current_goal is not None:
-                print("cancelling goal ...")
-                rclpy.spin_until_future_complete(node, node.current_goal, executor)
-                node.gh.cancel_goal_async()
-                print("done")
+            node.cancel_goal(node.current_goal)
 
     # Destroy the node explicitly
     # (optional - otherwise it will be done automatically
     # when the garbage collector destroys the node object)
-    node.destroy_node()
+    # node.destroy_node()
     if rclpy.ok(): rclpy.shutdown()
 
 
