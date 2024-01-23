@@ -1,5 +1,6 @@
 """Subscriber module"""
 import rclpy
+import time
 import threading    
 
 import numpy as np
@@ -181,7 +182,7 @@ class MjViewer(Node):
         rclpy.spin_until_future_complete(self, g, executor=self.executor)
         gh = g.result()
         cancel_fut = gh.cancel_goal_async()
-        rclpy.spin_until_future_complete(self, cancel_fut, executor=self.executor)
+        if cancel_fut is not None: rclpy.spin_until_future_complete(self, cancel_fut, executor=self.executor)
 
         self.log.info("goal canceled")
 
@@ -210,18 +211,18 @@ class MjViewer(Node):
 
         self.rs.update_robot_state(self.current_q)
         T, J, Ts = self.ur5.fk(fk_type="space")
-        Tgoal = trafo(t=[0,0,0.005])@T
+        Tgoal = trafo(t=[0,0,0.008])@T
 
         qnew = self.solve_IK(Tgoal, T, J)
         g = self.traj_client.send_goal_async(
-            self.create_traj(qfinal=qnew, time=2)
+            self.create_traj(qfinal=qnew, time=1)
         )
-        rclpy.spin_until_future_complete(self, g, executor=self.executor)
+        time.sleep(1.5)
         self.log.info("inserting")
 
         self.rs.update_robot_state(self.current_q)
         T, J, Ts = self.ur5.fk(fk_type="space")
-        Tgoal = T@trafo(t=[0,0,-0.05])
+        Tgoal = T@trafo(t=[0,0,-0.08])
 
         qnew = self.solve_IK(Tgoal, T, J)
         g = self.traj_client.send_goal_async(
@@ -285,6 +286,8 @@ class MjViewer(Node):
 
                 self.cancel_goal(self.current_goal)
                 self.insertion()
+                self.destroy_node()
+                return
                 
         Toff = tf.rotation_matrix(-1*np.sign(zGr[2])*zErr, [1,0,0])
         camGoal = T@trafo(t=[-self.px_gain*x_err,self.px_gain*y_err, -0.05])@Toff
@@ -314,11 +317,10 @@ def main(args=None):
         rclpy.spin(node, executor)
     except KeyboardInterrupt:
         node.get_logger().info('Keyboard interrupt, shutting down.\n')
-        node.timer.destroy()
-        del node.rs
 
-        if node.ctrl_mode == CtrlMode.TRAJ and node.current_goal is not None:
-            node.cancel_goal(node.current_goal)
+    del node.rs
+    if node.ctrl_mode == CtrlMode.TRAJ and node.current_goal is not None:
+        node.cancel_goal(node.current_goal)
 
     # Destroy the node explicitly
     # (optional - otherwise it will be done automatically
