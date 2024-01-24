@@ -20,6 +20,8 @@ from stack_approach.ik.common import trafo
 from controller_manager import switch_controllers, list_controllers
 from collections import deque
 
+from stack_approach.robotiq_gripper import RobotiqGripper
+
 class CtrlMode:
     TRAJ=0
     FRWRD=1
@@ -139,8 +141,6 @@ class MjViewer(Node):
         self.log.info("got joints:")
         for j in self.joint_names: self.log.info(f"\t- {j}")
 
-        self.log.info("setup done")
-
         self.timer = self.create_timer(1/rate, self.run, callback_group=ReentrantCallbackGroup())
 
         self.win_length = 10
@@ -149,6 +149,14 @@ class MjViewer(Node):
         self.zErrs = deque(maxlen=5)
 
         self.phase = CtrlPhase.CORRETION
+
+        self.log.info("gripper setup")
+
+        self.gripper = RobotiqGripper()
+        self.gripper.connect("192.168.56.101", 63352)
+        self.gripper.move_and_wait_for_pos(0, 0, 0)   
+
+        self.log.info("setup done")
 
     def js_callback(self, msg): 
         self.current_q = {jname: q for jname, q in zip(msg.name, msg.position)}
@@ -207,6 +215,10 @@ class MjViewer(Node):
         return qnew
     
     def insertion(self):
+        """
+        this method is blocking (i.e. callbacks are not being attended)
+        so we plan the path relative to the inital pose 
+        """
         self.log.info("going up")
 
         self.rs.update_robot_state(self.current_q)
@@ -220,15 +232,33 @@ class MjViewer(Node):
         time.sleep(1.5)
         self.log.info("inserting")
 
-        self.rs.update_robot_state(self.current_q)
-        T, J, Ts = self.ur5.fk(fk_type="space")
-        Tgoal = T@trafo(t=[0,0,-0.08])
-
+        Tgoal = trafo(t=[0,0,0.008])@T@trafo(t=[0,0,-0.08])
         qnew = self.solve_IK(Tgoal, T, J)
         g = self.traj_client.send_goal_async(
-            self.create_traj(qfinal=qnew, time=6)
+            self.create_traj(qfinal=qnew, time=4.5)
         )
-        rclpy.spin_until_future_complete(self, g, executor=self.executor)
+        time.sleep(5.2)
+
+        self.gripper.move_and_wait_for_pos(240, 0, 0)
+        time.sleep(0.5)
+
+        self.log.info("insertion done")
+
+        Tgoal = trafo(t=[0,0,0.12])@T@trafo(t=[0,0,-0.08])
+        qnew = self.solve_IK(Tgoal, T, J)
+        g = self.traj_client.send_goal_async(
+            self.create_traj(qfinal=qnew, time=3)
+        )
+        time.sleep(3)
+
+        self.log.info("lifting done")
+
+        Tgoal = trafo(t=[0,0,0.12])@T@trafo(t=[0,0,0.03])
+        qnew = self.solve_IK(Tgoal, T, J)
+        g = self.traj_client.send_goal_async(
+            self.create_traj(qfinal=qnew, time=3)
+        )
+        time.sleep(3)
 
         self.log.info("movement done")
 
@@ -277,7 +307,7 @@ class MjViewer(Node):
                 self.phase = CtrlPhase.APPROACH
 
         if self.phase == CtrlPhase.APPROACH:
-            if np.any(np.abs(self.img_errors)>10) and np.any(np.abs(self.img_error_deltas)>10):
+            if np.any(np.abs(self.img_errors)>22) and np.any(np.abs(self.img_error_deltas)>15):
                 """ due to the confusing ROS2 threading model, we cancel the timer here and do everything synchronously
                 """
                 self.log.info("TRANSITION TO INSERTION")
