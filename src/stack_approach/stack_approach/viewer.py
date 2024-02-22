@@ -154,6 +154,7 @@ class MjViewer(Node):
 
         self.gripper = RobotiqGripper()
         self.gripper.connect("192.168.56.101", 63352)
+        self.gripper.activate(auto_calibrate=False)
         self.gripper.move_and_wait_for_pos(0, 0, 0)   
 
         self.log.info("setup done")
@@ -232,7 +233,7 @@ class MjViewer(Node):
         time.sleep(1.5)
         self.log.info("inserting")
 
-        Tgoal = trafo(t=[0,0,0.008])@T@trafo(t=[0,0,-0.08])
+        Tgoal = trafo(t=[0,0,0.008])@T@trafo(t=[0,0,-0.10])
         qnew = self.solve_IK(Tgoal, T, J)
         g = self.traj_client.send_goal_async(
             self.create_traj(qfinal=qnew, time=4.5)
@@ -244,7 +245,7 @@ class MjViewer(Node):
 
         self.log.info("insertion done")
 
-        Tgoal = trafo(t=[0,0,0.12])@T@trafo(t=[0,0,-0.08])
+        Tgoal = trafo(t=[0,0,0.12])@T@trafo(t=[0,0,-0.10])
         qnew = self.solve_IK(Tgoal, T, J)
         g = self.traj_client.send_goal_async(
             self.create_traj(qfinal=qnew, time=3)
@@ -302,12 +303,17 @@ class MjViewer(Node):
         self.img_error_deltas.append(self.img_error_delta)
 
         if self.phase == CtrlPhase.CORRETION:
-            if np.all(np.abs(self.img_errors)<7) and np.all(np.array(self.zErrs)<0.05):
+            x_gain = self.px_gain
+            y_gain = self.px_gain
+            if np.any(np.abs(self.img_errors)<12) and np.all(np.array(self.zErrs)<0.05):
                 self.log.info("TRANSITION TO APPROACH")
                 self.phase = CtrlPhase.APPROACH
 
         if self.phase == CtrlPhase.APPROACH:
-            if np.any(np.abs(self.img_errors)>22) and np.any(np.abs(self.img_error_deltas)>15):
+            x_gain = 0.33*self.px_gain
+            y_gain = 0.5*self.px_gain
+
+            if np.any(np.abs(self.img_errors)>35) and np.any(np.abs(self.img_error_deltas)>15):
                 """ due to the confusing ROS2 threading model, we cancel the timer here and do everything synchronously
                 """
                 self.log.info("TRANSITION TO INSERTION")
@@ -320,7 +326,7 @@ class MjViewer(Node):
                 return
                 
         Toff = tf.rotation_matrix(-1*np.sign(zGr[2])*zErr, [1,0,0])
-        camGoal = T@trafo(t=[-self.px_gain*x_err,self.px_gain*y_err, -0.05])@Toff
+        camGoal = T@trafo(t=[-x_gain*x_err,y_gain*y_err, -0.05])@Toff
 
         # if self.with_vis: self.rs.draw_goal(camGoal)
 

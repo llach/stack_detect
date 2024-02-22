@@ -20,6 +20,7 @@ setup(
     entry_points={
         'console_scripts': [
             'viewer = stack_approach.viewer:main',
+            'grasp = stack_approach.3d_grasp:main',
         ],
     },
 )

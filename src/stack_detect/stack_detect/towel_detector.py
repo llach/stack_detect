@@ -20,17 +20,20 @@ class TowelDetector(Node):
     def __init__(self):
         super().__init__("towel_detector")
 
+        # defaults                                          pink        yellow
         self.declare_parameter("debug_img", "none")
-        self.declare_parameter("hue", 340)
-        self.declare_parameter("hue_tol", 0.04)
-        self.declare_parameter("sat_range", [120, 255])
-        self.declare_parameter("offset", [0, 0])
+        self.declare_parameter("hue", 48)              #   340             48       
+        self.declare_parameter("hue_tol", 0.1)         #    0.04           0.1
+        self.declare_parameter("sat_range", [120, 255]) #           [120, 255]
+        self.declare_parameter("offset", [0, 0])        #
+        self.declare_parameter("morph_size", 4)        #    15             4
 
         self.debug_img = self.get_parameter("debug_img").value
         self.hue = self.get_parameter("hue").value
         self.hue_tol = self.get_parameter("hue_tol").value
         self.sat_range = self.get_parameter("sat_range").value
         self.offset = self.get_parameter("offset").value
+        self.morph_size = self.get_parameter("morph_size").value
 
         assert self.debug_img in ["final", "all", "none"], 'self.debug_img in ["final", "all", None]'
 
@@ -56,6 +59,7 @@ class TowelDetector(Node):
         self.ld.hue_tol = self.hue_tol
         self.ld.sat_range = self.sat_range
         self.ld.offset = self.offset
+        self.ld.morph_size = self.morph_size
 
     def parameter_callback(self, params):
         for p in params:

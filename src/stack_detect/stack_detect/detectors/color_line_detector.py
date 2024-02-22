@@ -3,11 +3,12 @@ import numpy as np
 
 class ColorLineDetector:
 
-    def __init__(self, hue=330, hue_tol=0.06, sat_range=(40,255), offset=(0,0)):
+    def __init__(self, hue=330, hue_tol=0.06, sat_range=(40,255), offset=(0,0), morph_size=15):
         self.hue = hue
         self.hue_tol = hue_tol
         self.offset = np.array(offset).astype(np.int16)
         self.sat_range = sat_range
+        self.morph_size = morph_size
 
     def detect(self, frame):
         # Step 1: filter for color (uses HSL space for better stability)
@@ -17,8 +18,8 @@ class ColorLineDetector:
         upper_col = np.hstack([frame, towel_col])
 
         # Step 2: 1st opening to remove outliers; 2nd closing to have a consistent towel blob
-        morph_open = cv2.morphologyEx(towel_bin, cv2.MORPH_OPEN, np.ones((15,15),np.uint8))
-        morph_close = cv2.morphologyEx(morph_open, cv2.MORPH_CLOSE, np.ones((15,15),np.uint8))
+        morph_open = cv2.morphologyEx(towel_bin, cv2.MORPH_OPEN, np.ones((self.morph_size, self.morph_size),np.uint8))
+        morph_close = cv2.morphologyEx(morph_open, cv2.MORPH_CLOSE, np.ones((self.morph_size, self.morph_size),np.uint8))
 
         # Step 2.1: TODO - add filter for patch size!
 
@@ -67,7 +68,8 @@ class ColorLineDetector:
             return None, None, (all_steps_img,  final_img)
 
     # tol in [0,1] is tolerance in percent
-    def _filter_hue_color(self, img, tol=0.06):
+    def _filter_hue_color(self, img):
+        tol = self.hue_tol
         target_hue = self.hue/2 # cv stores H/2 in 8bit images
 
         # convert image to HLS color space and separate individual dimensions
