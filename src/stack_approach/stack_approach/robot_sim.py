@@ -13,7 +13,7 @@ class RobotSim:
     qmax = 6.283
     umax = 360
 
-    def __init__(self, with_vis=False) -> None:
+    def __init__(self, tip_frame, with_vis=False) -> None:
         self.with_vis = with_vis
         self.thread_active = False
         
@@ -35,17 +35,10 @@ class RobotSim:
             ("wrist_3_link", JT.REV),
             ("hand_link", JT.FIX),
             ("hand_base", JT.FIX),
-            ("hande_right_finger", JT.FIX),
         ]
 
         # TODO publish this frame (maybe tune it also)
-        cam = self.model.camera(0)
-        camera_frame = [
-            cam.name,
-            cam.pos,
-            mj2quat(cam.quat)
-        ]
-        self.ur5 = RobotModel(self.model, self.data, links=links, tip_frame=camera_frame)
+        self.ur5 = RobotModel(self.model, self.data, links=links, tip_frame=tip_frame)
 
         if self.with_vis:
             viewer = mujoco_viewer.MujocoViewer(self.model, self.data)

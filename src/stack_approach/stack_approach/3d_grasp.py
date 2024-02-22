@@ -7,7 +7,8 @@ import ros2_numpy as rnp
 import ctypes
 import struct
 from rclpy.executors import MultiThreadedExecutor
-from geometry_msgs.msg import TransformStamped, PointStamped
+from geometry_msgs.msg import TransformStamped, PointStamped, PoseStamped
+from tf2_geometry_msgs import PoseStamped
 
 from tf2_ros import TransformBroadcaster
 from rclpy.node import Node
@@ -21,29 +22,11 @@ from rcl_interfaces.msg import SetParametersResult
 import tf_transformations as tf
 
 from matplotlib import colormaps as cm
+from stack_approach.robot_sim import RobotSim
 
-"""
-{
-	"class_name" : "ViewTrajectory",
-	"interval" : 29,
-	"is_loop" : false,
-	"trajectory" : 
-	[
-		{
-			"boundingbox_max" : [ 0.10000000000000002, 0.14327596127986908, 0.43650001287460327 ],
-			"boundingbox_min" : [ -0.045445997267961502, -0.14484645426273346, -0.0060000000000000001 ],
-			"field_of_view" : 60.0,
-			"front" : [ 0.12346865912958778, -0.20876634334886676, -0.97014024970489954 ],
-			"lookat" : [ 0.012304816534506125, -0.0072898239635080433, 0.21474424582004883 ],
-			"up" : [ 0.9914498309557469, 0.06754698721022645, 0.11164513969108841 ],
-			"zoom" : 0.35999999999999965
-		}
-	],
-	"version_major" : 1,
-	"version_minor" : 0
-}
-
-"""
+from tf2_ros import TransformException
+from tf2_ros.buffer import Buffer
+from tf2_ros.transform_listener import TransformListener
 
 VIEW_PARAMS = { 
     "front" : [ 0.12346865912958778, -0.20876634334886676, -0.97014024970489954 ],
@@ -110,6 +93,18 @@ def remove_points_on_plane_and_below(pcd):
 class StackDetector3D(Node):
     """Subscriber node"""
 
+    ROS_TIP = [
+        "tip_frame",
+        [0.012, 0.0, 0.181],
+        [-0.5, -0.5, 0.5, 0.5],
+    ]
+
+    MJ_TIP = [
+        "tip_frame",
+        [-0.012, 0.0, 0.181],
+        [-0.5, 0.5, -0.5, 0.5],
+    ]
+
     def __init__(self, executor):
         self.exe = executor
         super().__init__("StackDetector3D")
@@ -125,21 +120,47 @@ class StackDetector3D(Node):
 
         self.ppub = self.create_publisher(PointStamped, '/grasp_point', 10, callback_group=self.cb_group)
 
+        self.rs = RobotSim(with_vis=False, tip_frame=self.MJ_TIP)
+        self.ur5 = self.rs.ur5
+
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+
     def broadcast_timer_callback(self):
        t = TransformStamped()
 
        t.header.stamp = self.get_clock().now().to_msg()
-       t.header.frame_id = 'hande_right_finger'
+       t.header.frame_id = 'hand_e_link'
        t.child_frame_id = 'tip_frame'
-       t.transform.translation.x = 0.0
+       t.transform.translation.x = 0.012
        t.transform.translation.y = 0.0
-       t.transform.translation.z = 0.05
-       t.transform.rotation.x = 0.0
-       t.transform.rotation.y = 0.0
-       t.transform.rotation.z = 0.0
-       t.transform.rotation.w = 1.0
+       t.transform.translation.z = 0.181
+       t.transform.rotation.x = -0.5
+       t.transform.rotation.y = -0.5
+       t.transform.rotation.z = 0.5
+       t.transform.rotation.w = 0.5
 
        self.tf_broadcaster.sendTransform(t)
+
+    def solve_IK(self, goal, T, J, scale=[1,1]):
+          # calculate IK. scaling orientation down improves accuracy in position
+        qdot, N = self.ur5.ik([
+            self.ur5.pose_task(goal, T, J, scale=scale),
+        ])
+
+        # clip deltaqs
+        # qdot = np.clip(qdot, -self.max_dq, self.max_dq)
+        qdot = self.ur5.extract_q_subset(qdot, self.joint_names)
+
+        # calculate new qs, respect joint limits
+        qnew = {n: np.clip(self.current_q[n]+qdot[n], -self.rs.qmax, self.rs.qmax) for n in self.joint_names}
+
+        # print("now", self.current_q)
+        # print("qd ", qdot)
+        # print("new", qnew)
+        # print()
+
+        return qnew
 
     def publish_point(self, gp, frame):
         p = PointStamped()
@@ -200,40 +221,44 @@ class StackDetector3D(Node):
         C, labels = random_growing_clusters(pcd, np.all([angs<0.4, angs>0.1], axis=0), k=20, min_size=50)
         grasp_point = None
 
-        if len(C)>0:
-            Cp = [points[Ci] for Ci in C]
-            centers = np.array([np.mean(cp, axis=0) for cp in Cp])
-            centers = centers[centers[:,1]>stack_center[1]] # filter by height
+        try:
+            if len(C)>0:
+                Cp = [points[Ci] for Ci in C]
+                centers = np.array([np.mean(cp, axis=0) for cp in Cp])
+                centers = centers[centers[:,1]>stack_center[1]] # filter by height
 
-            if len(centers)==0:
-                print("no clusters left after height filtering")
-                return
+                if len(centers)==0:
+                    print("no clusters left after height filtering")
+                    return
 
-            top_clust_idx = np.argmax(centers[:,1])
-            top_center = centers[top_clust_idx]
+                top_clust_idx = np.argmax(centers[:,1])
+                top_center = centers[top_clust_idx]
 
-            tree = o3d.geometry.KDTreeFlann(pcd)
-            [_, center_idxs, _] = tree.search_radius_vector_3d(top_center, 0.02)
-            Cc = []
-            for ci in center_idxs:
-                if ci in C[top_clust_idx]: Cc.append(ci)
+                tree = o3d.geometry.KDTreeFlann(pcd)
+                [_, center_idxs, _] = tree.search_radius_vector_3d(top_center, 0.02)
+                Cc = []
+                for ci in center_idxs:
+                    if ci in C[top_clust_idx]: Cc.append(ci)
 
-            Ccp = points[Cc]
-            if len(Ccp)==0:
-                print("no clusters found")
-                return
-        
-            Ccp_size = np.abs(np.max(Ccp, axis=0)-np.min(Ccp, axis=0))
+                Ccp = points[Cc]
+                if len(Ccp)==0:
+                    print("no clusters found")
+                    return
+            
+                Ccp_size = np.abs(np.max(Ccp, axis=0)-np.min(Ccp, axis=0))
 
-            grasp_point = stack_center.copy()
-            grasp_point[1] = top_center[1]-Ccp_size[1]/2
-            grasp_point = R@grasp_point
+                grasp_point = stack_center.copy()
+                grasp_point[1] = top_center[1]-Ccp_size[1]/2
+                grasp_point = R@grasp_point
 
-            cmap = cm["tab20"]
-            colors = np.array([cmap.colors[l] if l != 0 else colors[i] for l in labels])
-            for ci in Cc:
-                colors[ci] = [0, 1, 1]
-
+                cmap = cm["tab20"]
+                colors = np.array([cmap.colors[l] if l != 0 else colors[i] for l in labels])
+                for ci in Cc:
+                    colors[ci] = [0, 1, 1]
+        except:
+            print("error")
+            return
+    
         pcd.colors = o3d.utility.Vector3dVector(colors[:, :3])
         pcd = pcd.rotate(R.T, center=[0,0,0])
         stack_center = R@stack_center
@@ -257,7 +282,27 @@ class StackDetector3D(Node):
         #     point_show_normal=False,
         #     **VIEW_PARAMS
         # )
-        self.publish_point(grasp_point, msg.header.frame_id)
+        if grasp_point is not None: 
+            p = PoseStamped()
+
+            p.header.stamp = self.get_clock().now().to_msg()
+            p.header.frame_id = msg.header.frame_id
+            p.pose.position.x = grasp_point[0]
+            p.pose.position.y = grasp_point[1]
+            p.pose.position.z = grasp_point[2]
+
+            try:
+                pworld = self.tf_buffer.transform(p, "world", timeout=rclpy.duration.Duration(seconds=10))
+
+                point_w = PointStamped()
+                point_w.header = pworld.header
+                point_w.point = pworld.pose.position
+                self.ppub.publish(point_w)
+                print("TF found")
+            except TransformException as ex:
+                self.get_logger().info(
+                    f'Could not transform msg.header.frame_id to world: {ex}')
+                return
 
 
 def main(args=None):
