@@ -22,6 +22,36 @@ import tf_transformations as tf
 
 from matplotlib import colormaps as cm
 
+"""
+{
+	"class_name" : "ViewTrajectory",
+	"interval" : 29,
+	"is_loop" : false,
+	"trajectory" : 
+	[
+		{
+			"boundingbox_max" : [ 0.10000000000000002, 0.14327596127986908, 0.43650001287460327 ],
+			"boundingbox_min" : [ -0.045445997267961502, -0.14484645426273346, -0.0060000000000000001 ],
+			"field_of_view" : 60.0,
+			"front" : [ 0.12346865912958778, -0.20876634334886676, -0.97014024970489954 ],
+			"lookat" : [ 0.012304816534506125, -0.0072898239635080433, 0.21474424582004883 ],
+			"up" : [ 0.9914498309557469, 0.06754698721022645, 0.11164513969108841 ],
+			"zoom" : 0.35999999999999965
+		}
+	],
+	"version_major" : 1,
+	"version_minor" : 0
+}
+
+"""
+
+VIEW_PARAMS = { 
+    "front" : [ 0.12346865912958778, -0.20876634334886676, -0.97014024970489954 ],
+    "lookat" : [ 0.012304816534506125, -0.0072898239635080433, 0.21474424582004883 ],
+    "up" : [ 0.9914498309557469, 0.06754698721022645, 0.11164513969108841 ],
+    "zoom" : 0.35999999999999965
+}
+
 def random_growing_clusters(pcd, cond, k=10, min_size=500):
     C = [] #cluster
     idxs = list(cond.nonzero()[0]) # indices of all points that match the condition
@@ -163,13 +193,21 @@ class StackDetector3D(Node):
         colors_angles = sms(angs)[:,:3]
         for i, ang in enumerate(angs):
             if ang < 0.4 and ang > 0.1: colors[i] = colors_angles[i]
+
+        points = np.array(pcd.points)
+        stack_center = np.mean(points, axis=0)
        
         C, labels = random_growing_clusters(pcd, np.all([angs<0.4, angs>0.1], axis=0), k=20, min_size=50)
         grasp_point = None
+
         if len(C)>0:
-            points = np.array(pcd.points)
             Cp = [points[Ci] for Ci in C]
             centers = np.array([np.mean(cp, axis=0) for cp in Cp])
+            centers = centers[centers[:,1]>stack_center[1]] # filter by height
+
+            if len(centers)==0:
+                print("no clusters left after height filtering")
+                return
 
             top_clust_idx = np.argmax(centers[:,1])
             top_center = centers[top_clust_idx]
@@ -181,10 +219,15 @@ class StackDetector3D(Node):
                 if ci in C[top_clust_idx]: Cc.append(ci)
 
             Ccp = points[Cc]
+            if len(Ccp)==0:
+                print("no clusters found")
+                return
+        
             Ccp_size = np.abs(np.max(Ccp, axis=0)-np.min(Ccp, axis=0))
 
-            grasp_point = np.mean(points, axis=0)
+            grasp_point = stack_center.copy()
             grasp_point[1] = top_center[1]-Ccp_size[1]/2
+            grasp_point = R@grasp_point
 
             cmap = cm["tab20"]
             colors = np.array([cmap.colors[l] if l != 0 else colors[i] for l in labels])
@@ -192,21 +235,29 @@ class StackDetector3D(Node):
                 colors[ci] = [0, 1, 1]
 
         pcd.colors = o3d.utility.Vector3dVector(colors[:, :3])
-
         pcd = pcd.rotate(R.T, center=[0,0,0])
-        grasp_point = R@grasp_point
+        stack_center = R@stack_center
 
-        mesh_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.2, origin=[0,0,0])
+        mesh_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0,0,0])
         geoms = [pcd, mesh_frame]
 
         if grasp_point is not None:
-            center_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.005)
-            center_sphere.translate(grasp_point)
-            center_sphere.paint_uniform_color([1,0,0])
-            geoms.append(center_sphere)
+            grasp_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.005)
+            grasp_sphere.translate(grasp_point)
+            grasp_sphere.paint_uniform_color([1,0,0])
+            geoms.append(grasp_sphere)
 
-        o3d.visualization.draw_geometries(geoms, point_show_normal=False)
-        # self.publish_point(grasp_point, msg.header.frame_id)
+        center_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.005)
+        center_sphere.translate(stack_center)
+        center_sphere.paint_uniform_color([0,0,1])
+        geoms.append(center_sphere)
+        
+        # o3d.visualization.draw_geometries(
+        #     geoms, 
+        #     point_show_normal=False,
+        #     **VIEW_PARAMS
+        # )
+        self.publish_point(grasp_point, msg.header.frame_id)
 
 
 def main(args=None):
