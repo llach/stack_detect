@@ -21,6 +21,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallb
 import tf_transformations as tf
 
 from moveit_msgs.srv import GetPositionIK
+from stack_approach.robotiq_gripper import RobotiqGripper
 
 class StackGrasp(Node):
     """Subscriber node"""
@@ -80,6 +81,16 @@ class StackGrasp(Node):
         self.log.info("got joints:")
         for j in self.joint_names: self.log.info(f"\t- {j}")
 
+        self.log.info("gripper setup")
+
+        self.gripper = RobotiqGripper()
+        self.gripper.connect("192.168.56.101", 63352)
+        self.gripper.activate(auto_calibrate=False)
+        self.gripper.move_and_wait_for_pos(0, 0, 0)   
+
+        self.log.info("setup done")
+
+
     def moveit_IK(self, state, pose, ik_link="wrist_3_link"):
         print("doing IK ... ")
         ik_req = GetPositionIK.Request()
@@ -111,7 +122,7 @@ class StackGrasp(Node):
         
         print("approaching ...")
         approach_q = self.moveit_IK(self.current_q, self.pwrist)
-        self.send_traj_blocking(approach_q, 7)
+        self.send_traj_blocking(approach_q, 5)
 
         print("inserting ...")
         pinsert = self.get_wrist_pose()
@@ -119,6 +130,24 @@ class StackGrasp(Node):
 
         insert_q = self.moveit_IK(approach_q, pinsert)
         self.send_traj_blocking(insert_q, 3)
+
+        print("closing gripper")
+        self.gripper.move_and_wait_for_pos(240, 0, 0)
+        time.sleep(0.5)
+
+        print("lifting")
+        plift = self.get_wrist_pose()
+        plift.pose.position.x = -0.08
+
+        lift_q = self.moveit_IK(insert_q, plift)
+        self.send_traj_blocking(lift_q, 3)
+
+        print("retreating")
+        pretr = self.get_wrist_pose()
+        pretr.pose.position.z = -0.07
+
+        retr_q = self.moveit_IK(lift_q, pretr)
+        self.send_traj_blocking(retr_q, 3)
 
         print("all done!")
         self.destroy_node()
