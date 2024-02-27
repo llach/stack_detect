@@ -3,6 +3,7 @@ import open3d as o3d
 import rclpy
 import numpy as np
 import time
+from datetime import datetime
 
 import threading 
 from rcl_interfaces.srv import GetParameters
@@ -18,7 +19,7 @@ from moveit_msgs.msg import DisplayRobotState
 
 from tf2_ros import TransformBroadcaster
 from rclpy.node import Node
-from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallbackGroup
 
 from sensor_msgs.msg import PointCloud2
 from sensor_msgs_py.point_cloud2 import read_points_numpy
@@ -31,6 +32,8 @@ from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 
 from moveit_msgs.srv import GetPositionIK
+from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSReliabilityPolicy
+from rclpy.qos import QoSProfile
 
 VIEW_PARAMS = { 
     "front" : [ 0.12346865912958778, -0.20876634334886676, -0.97014024970489954 ],
@@ -38,6 +41,10 @@ VIEW_PARAMS = {
     "up" : [ 0.9914498309557469, 0.06754698721022645, 0.11164513969108841 ],
     "zoom" : 0.35999999999999965
 }
+
+def sort_list_by_indices(li, idxs):
+    li = [li[i] for i in idxs]
+    return li
 
 def random_growing_clusters(pcd, cond, k=10, min_size=500):
     C = [] #cluster
@@ -74,50 +81,48 @@ def random_growing_clusters(pcd, cond, k=10, min_size=500):
 
     return C, labels
 
+def cloud_var(pcd):
+    points = np.array(pcd.points)
+    return np.abs(np.min(points, axis=0) - np.max(points, axis=0))
 
-def remove_points_on_plane_and_below(pcd):
+
+def remove_points_on_plane_and_below(pcd, cam_direction=2):
+    geoms = []
+
+    # get inliers and outliers, paint for debugging
     _, inliers = pcd.segment_plane(distance_threshold=0.01,
                                             ransac_n=3,
                                             num_iterations=1000)
-
-    # get inliers and outliers, paint for debugging
     inlier_cloud = pcd.select_by_index(inliers)
     inlier_cloud.paint_uniform_color([1.0, 0, 0])
     outlier_cloud = pcd.select_by_index(inliers, invert=True)
     outlier_pts = np.array(outlier_cloud.points)
+    # geoms += [inlier_cloud, outlier_cloud]
 
-    # using all defaults
-    pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamRadius(radius=0.005))
-    oboxes = pcd.detect_planar_patches(
-        normal_variance_threshold_deg=60,
-        coplanarity_deg=75,
-        outlier_ratio=0.75,
-        min_plane_edge_length=0,
-        min_num_points=0,
-        search_param=o3d.geometry.KDTreeSearchParamKNN(knn=30))
+    got_ground_plane = cloud_var(inlier_cloud)[cam_direction] >  cloud_var(outlier_cloud)[cam_direction]
 
-    print("Detected {} patches".format(len(oboxes)))
+    if got_ground_plane:
+        print("got ground plane")
+        # find the highest point in the plane (on whichever axis is up) and remove all points lower than that
+        highest_plane_point = np.max(np.array(inlier_cloud.points)[:,0])
+        higher_indices = np.where(outlier_pts[:,0]>highest_plane_point)[0]
+    else:
+        print("got vertical (stack) plane")
+        closest_plane_point = np.min(np.array(inlier_cloud.points)[:,cam_direction])
+        points = np.array(pcd.points)
+        higher_indices = np.where(points[:,cam_direction]>closest_plane_point)[0]
+    
+    pcd = pcd.select_by_index(higher_indices)
+    geoms.append(pcd)
 
-    geometries = []
-    for obox in oboxes:
-        mesh = o3d.geometry.TriangleMesh.create_from_oriented_bounding_box(obox, scale=[1, 1, 0.0001])
-        mesh.paint_uniform_color(obox.color)
-        geometries.append(mesh)
-        geometries.append(obox)
-    geometries.append(pcd)
-
-    # geoms = [inlier_cloud, outlier_cloud]
-    o3d.visualization.draw_geometries(
-        geometries, 
-        point_show_normal=False,
-        **VIEW_PARAMS
-    )
-    return
-
-    # find the highest point in the plane (on whichever axis is up) and remove all points lower than that
-    highest_plane_point = np.max(np.array(inlier_cloud.points)[:,0])
-    higher_indices = np.where(outlier_pts[:,0]>highest_plane_point)[0]
-    pcd = outlier_cloud.select_by_index(higher_indices)
+    mesh_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0,0,0])
+    geoms.append(mesh_frame)
+   
+    # o3d.visualization.draw_geoms(
+    #     geoms, 
+    #     point_show_normal=False,
+    #     # **VIEW_PARAMS
+    # )
 
     return pcd
 
@@ -140,8 +145,13 @@ class StackDetector3D(Node):
 
         self.cb_group = ReentrantCallbackGroup()
 
+        qos_profile = QoSProfile(depth=1)
+        qos_profile.history = QoSHistoryPolicy.KEEP_LAST
+        qos_profile.reliability = QoSReliabilityPolicy.BEST_EFFORT
+        qos_profile.durability = QoSDurabilityPolicy.VOLATILE
+
         self.subscription = self.create_subscription(
-            PointCloud2, "/camera/depth/color/points", self.point_cb, 0, callback_group=self.cb_group
+            PointCloud2, "/camera/depth/color/points", self.point_cb, qos_profile, callback_group=MutuallyExclusiveCallbackGroup()
         )
 
         self.tf_broadcaster = TransformBroadcaster(self)
@@ -186,6 +196,10 @@ class StackDetector3D(Node):
         return traj_goal
 
     def point_cb(self, msg):
+        t = rclpy.time.Time.from_msg(msg.header.stamp)
+        dt = datetime.fromtimestamp(t.nanoseconds // 1000000000)
+        print(dt)
+        geoms = []
         points = read_points_numpy(msg)
         
         pcd = o3d.geometry.PointCloud()
@@ -199,13 +213,12 @@ class StackDetector3D(Node):
 
         pcd = pcd.crop(aabb)
 
-        # step II: remove supporting plane and points below
+        # # step II: some pcds have a lot of noise, so we remove outliers based on density
         pcd, _ = pcd.remove_radius_outlier(nb_points=250, radius=0.02)
-        # pcd = remove_points_on_plane_and_below(pcd)
 
-        # # step III: some pcds still had some noise, so we remove outliers based on density
-        # pcd, _ = pcd.remove_radius_outlier(nb_points=250, radius=0.02)
-
+        # step III: remove supporting plane and points below
+        pcd = remove_points_on_plane_and_below(pcd) 
+        pcd, _ = pcd.remove_radius_outlier(nb_points=250, radius=0.02)
 
         Rz = tf.rotation_matrix(np.pi/2, [0,0,1])[:3,:3]
         Ry = tf.rotation_matrix(np.pi, [0,1,0])[:3,:3]
@@ -232,52 +245,67 @@ class StackDetector3D(Node):
         stack_center = np.mean(points, axis=0)
        
         C, labels = random_growing_clusters(pcd, np.all([angs<0.4, angs>0.1], axis=0), k=20, min_size=50)
-        grasp_point = None
 
-        try:
-            if len(C)>0:
-                Cp = [points[Ci] for Ci in C]
-                centers = np.array([np.mean(cp, axis=0) for cp in Cp])
-                centers = centers[centers[:,1]>stack_center[1]] # filter by height
-
-                if len(centers)==0:
-                    print("no clusters left after height filtering")
-                    return
-
-                top_clust_idx = np.argmax(centers[:,1])
-                top_center = centers[top_clust_idx]
-
-                tree = o3d.geometry.KDTreeFlann(pcd)
-                [_, center_idxs, _] = tree.search_radius_vector_3d(top_center, 0.02)
-                Cc = []
-                for ci in center_idxs:
-                    if ci in C[top_clust_idx]: Cc.append(ci)
-
-                Ccp = points[Cc]
-                if len(Ccp)==0:
-                    print("no clusters found")
-                    return
-            
-                Ccp_size = np.abs(np.max(Ccp, axis=0)-np.min(Ccp, axis=0))
-
-                grasp_point = top_center.copy()
-                grasp_point[1] = top_center[1]-Ccp_size[1]/2
-                grasp_point = R@grasp_point
-
-                cmap = cm["tab20"]
-                colors = np.array([cmap.colors[l] if l != 0 else colors[i] for l in labels])
-                for ci in Cc:
-                    colors[ci] = [0, 1, 1]
-        except:
-            print("error")
+        print(f"{len(pcd.points)} points | {len(C)} clusters")
+        if len(pcd.points) < 500:
+            print("too few points after filtering!")
             return
-    
-        pcd.colors = o3d.utility.Vector3dVector(colors[:, :3])
-        pcd = pcd.rotate(R.T, center=[0,0,0])
-        stack_center = R@stack_center
+        if len(C)==0:
+            print("no clusters found")
+            return
+        
+        #####
+        ##### from here on, we're sure that we found clusters
+        #####
 
-        mesh_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0,0,0])
-        geoms = [pcd, mesh_frame]
+        # get 3D points for each cluster
+        Cp = [points[Ci] for Ci in C]
+
+        # sort clusters by height and only select the 10 heighest clusters
+        centers = np.array([np.mean(cp, axis=0) for cp in Cp])
+        sorted_idxs = np.argsort(centers[:,1])[::-1]
+
+        centers = centers[sorted_idxs]
+        centers = centers [:10]
+
+        Cp = sort_list_by_indices(Cp, sorted_idxs)
+        Cp = Cp[:10]
+
+        C = sort_list_by_indices(C, sorted_idxs)
+        C = C[:10]
+
+        if centers[0,1]<stack_center[1]:
+            print("didn't find any cluster higher than the stack center.")
+            return
+
+        # redo labels
+        labels = np.zeros(len(points), dtype=np.int8)
+        for l, idxs in enumerate(C):
+            for i in idxs: labels[i] = l+1
+
+        # colors are set based on the tab10 colorscheme, so the cluster order is easily visible in the visulization
+        cmap = cm["tab10"]
+        colors = np.array([cmap.colors[l-1] if l != 0 else [0,0,0] for l in labels])
+
+        # we select points near the cluster center to get a better height estimate (clusters tend to widen around the outer edges of the stack)
+        tree = o3d.geometry.KDTreeFlann(pcd)
+        [_, center_idxs, _] = tree.search_radius_vector_3d(centers[0], 0.02)
+        cluster_center_idxs = []
+        for ci in center_idxs:
+            if ci in C[0]: 
+                cluster_center_idxs.append(ci)
+                colors[ci] = [0,1,1]
+        cluster_center_points = points[cluster_center_idxs]
+        cluster_center_size   = np.abs(np.max(cluster_center_points, axis=0) - np.min(cluster_center_points, axis=0))
+        pcd.colors = o3d.utility.Vector3dVector(colors[:, :3])
+
+        grasp_point = centers[0].copy()
+        grasp_point[0] = stack_center[0] # we want to grasp in the center of the stack, so we take the center of the whole stack instead of the cluster position
+        grasp_point[1] = grasp_point[1]-cluster_center_size[1]/2 # the grasp point should be at the bottom of the center, so we subtract half it's height
+
+        pcd = pcd.rotate(R.T, center=[0,0,0])
+        stack_center = R.T@stack_center
+        grasp_point = R.T@grasp_point
 
         if grasp_point is not None:
             grasp_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.005)
@@ -290,12 +318,14 @@ class StackDetector3D(Node):
         center_sphere.paint_uniform_color([0,0,1])
         geoms.append(center_sphere)
         
-        # o3d.visualization.draw_geometries(
-        #     geoms, 
-        #     point_show_normal=False,
-        #     **VIEW_PARAMS
-        # )
-        # return
+        mesh_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0,0,0])
+        geoms += [pcd, mesh_frame]
+        o3d.visualization.draw_geometries(
+            geoms, 
+            point_show_normal=False,
+            **VIEW_PARAMS
+        )
+        return
         if grasp_point is not None: 
             p = PoseStamped()
 

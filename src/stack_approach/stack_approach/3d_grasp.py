@@ -137,14 +137,14 @@ class StackGrasp(Node):
 
         print("lifting")
         plift = self.get_wrist_pose()
-        plift.pose.position.x = -0.08
+        plift.pose.position.x = -0.13
 
         lift_q = self.moveit_IK(insert_q, plift)
         self.send_traj_blocking(lift_q, 3)
 
         print("retreating")
         pretr = self.get_wrist_pose()
-        pretr.pose.position.z = -0.07
+        pretr.pose.position.z = -0.10
 
         retr_q = self.moveit_IK(lift_q, pretr)
         self.send_traj_blocking(retr_q, 3)
