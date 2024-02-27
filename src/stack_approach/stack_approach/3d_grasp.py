@@ -30,7 +30,7 @@ class StackGrasp(Node):
 
     def __init__(self, executor=None):
         self.exe = executor
-        super().__init__("StackDetector3D")
+        super().__init__("StackGrasp")
         self.log = self.get_logger()
 
         self.recbg = ReentrantCallbackGroup()

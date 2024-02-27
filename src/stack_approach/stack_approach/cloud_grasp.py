@@ -86,7 +86,7 @@ def cloud_var(pcd):
     return np.abs(np.min(points, axis=0) - np.max(points, axis=0))
 
 
-def remove_points_on_plane_and_below(pcd, cam_direction=2):
+def remove_points_on_plane_and_below(pcd, log, cam_direction=2):
     geoms = []
 
     # get inliers and outliers, paint for debugging
@@ -102,12 +102,12 @@ def remove_points_on_plane_and_below(pcd, cam_direction=2):
     got_ground_plane = cloud_var(inlier_cloud)[cam_direction] >  cloud_var(outlier_cloud)[cam_direction]
 
     if got_ground_plane:
-        print("got ground plane")
+        log.debug("got ground plane")
         # find the highest point in the plane (on whichever axis is up) and remove all points lower than that
         highest_plane_point = np.max(np.array(inlier_cloud.points)[:,0])
         higher_indices = np.where(outlier_pts[:,0]>highest_plane_point)[0]
     else:
-        print("got vertical (stack) plane")
+        log.debug("got vertical (stack) plane")
         closest_plane_point = np.min(np.array(inlier_cloud.points)[:,cam_direction])
         points = np.array(pcd.points)
         higher_indices = np.where(points[:,cam_direction]>closest_plane_point)[0]
@@ -155,7 +155,7 @@ class StackDetector3D(Node):
         )
 
         self.tf_broadcaster = TransformBroadcaster(self)
-        self.timer = self.create_timer(0.1, self.broadcast_timer_callback)#, executor=self.exe)
+        self.timer = self.create_timer(0.1, self.broadcast_timer_callback)
 
         self.ppub = self.create_publisher(PointStamped, '/grasp_point', 10, callback_group=self.cb_group)
         self.posepub = self.create_publisher(PoseStamped, '/grasp_pose', 10, callback_group=self.cb_group)
@@ -198,7 +198,9 @@ class StackDetector3D(Node):
     def point_cb(self, msg):
         t = rclpy.time.Time.from_msg(msg.header.stamp)
         dt = datetime.fromtimestamp(t.nanoseconds // 1000000000)
-        print(dt)
+        self.get_logger().debug(f"got data at {dt}")
+        start = time.time()
+
         geoms = []
         points = read_points_numpy(msg)
         
@@ -213,12 +215,12 @@ class StackDetector3D(Node):
 
         pcd = pcd.crop(aabb)
 
-        # # step II: some pcds have a lot of noise, so we remove outliers based on density
+        # # step II: some pcds have a lot of noise, so we remove outliers based on density. not doing so can result in suboptimal plane estimates
         pcd, _ = pcd.remove_radius_outlier(nb_points=250, radius=0.02)
 
         # step III: remove supporting plane and points below
-        pcd = remove_points_on_plane_and_below(pcd) 
-        pcd, _ = pcd.remove_radius_outlier(nb_points=250, radius=0.02)
+        pcd = remove_points_on_plane_and_below(pcd, log=self.get_logger()) 
+        pcd, _ = pcd.remove_radius_outlier(nb_points=250, radius=0.02) # cutting can leave small clusters behind, so we filter them again
 
         Rz = tf.rotation_matrix(np.pi/2, [0,0,1])[:3,:3]
         Ry = tf.rotation_matrix(np.pi, [0,1,0])[:3,:3]
@@ -233,25 +235,26 @@ class StackDetector3D(Node):
         angs = np.clip(np.arctan2(nls[:,1], nls[:,2]), -np.pi/2, np.pi/2)+(np.pi/2)
         angs /= np.pi
 
-        sms = cm["Spectral"]
-        colors = np.array(sms(angs))
+        # color pcd based on angles
+        # sms = cm["Spectral"]
+        # colors = np.array(sms(angs))
 
-        colors = np.array(pcd.colors)
-        colors_angles = sms(angs)[:,:3]
-        for i, ang in enumerate(angs):
-            if ang < 0.4 and ang > 0.1: colors[i] = colors_angles[i]
+        # colors = np.array(pcd.colors)
+        # colors_angles = sms(angs)[:,:3]
+        # for i, ang in enumerate(angs):
+        #     if ang < 0.4 and ang > 0.1: colors[i] = colors_angles[i]
 
         points = np.array(pcd.points)
         stack_center = np.mean(points, axis=0)
        
         C, labels = random_growing_clusters(pcd, np.all([angs<0.4, angs>0.1], axis=0), k=20, min_size=50)
 
-        print(f"{len(pcd.points)} points | {len(C)} clusters")
+        self.get_logger().debug(f"{len(pcd.points)} points | {len(C)} clusters")
         if len(pcd.points) < 500:
-            print("too few points after filtering!")
+            self.get_logger().warn("too few points after filtering!")
             return
         if len(C)==0:
-            print("no clusters found")
+            self.get_logger().warn("no clusters found")
             return
         
         #####
@@ -307,59 +310,48 @@ class StackDetector3D(Node):
         stack_center = R.T@stack_center
         grasp_point = R.T@grasp_point
 
-        if grasp_point is not None:
-            grasp_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.005)
-            grasp_sphere.translate(grasp_point)
-            grasp_sphere.paint_uniform_color([1,0,0])
-            geoms.append(grasp_sphere)
+        grasp_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.005)
+        grasp_sphere.translate(grasp_point)
+        grasp_sphere.paint_uniform_color([1,0,0])
+        geoms.append(grasp_sphere)
 
         center_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.005)
         center_sphere.translate(stack_center)
         center_sphere.paint_uniform_color([0,0,1])
         geoms.append(center_sphere)
         
-        mesh_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0,0,0])
-        geoms += [pcd, mesh_frame]
-        o3d.visualization.draw_geometries(
-            geoms, 
-            point_show_normal=False,
-            **VIEW_PARAMS
-        )
-        return
-        if grasp_point is not None: 
-            p = PoseStamped()
+        # mesh_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0,0,0])
+        # geoms += [pcd, mesh_frame]
+        # o3d.visualization.draw_geometries(
+        #     geoms, 
+        #     point_show_normal=False,
+        #     **VIEW_PARAMS
+        # )
+        
+        gp = PointStamped()
 
-            p.header.stamp = self.get_clock().now().to_msg()
-            p.header.frame_id = msg.header.frame_id
-            p.pose.position.x = grasp_point[0]
-            p.pose.position.y = grasp_point[1]
-            p.pose.position.z = grasp_point[2]
-            p.pose.orientation.x = 0.0
-            p.pose.orientation.y = 0.0
-            p.pose.orientation.z = 0.0
-            p.pose.orientation.w = 1.0
+        gp.header.stamp = self.get_clock().now().to_msg()
+        gp.header.frame_id = msg.header.frame_id
+        gp.point.x = grasp_point[0]
+        gp.point.y = grasp_point[1]
+        gp.point.z = grasp_point[2]
 
-            try:
-                pwrist = self.tf_buffer.transform(p, "wrist_3_link", timeout=rclpy.duration.Duration(seconds=10))
-                pwrist.pose.orientation.x = 0.0
-                pwrist.pose.orientation.y = 0.0
-                pwrist.pose.orientation.z = 0.0
-                pwrist.pose.orientation.w = 1.0
+        self.ppub.publish(gp)
+        self.get_logger().debug(f"publishing point at {datetime.now()}")
 
-                point_w = PointStamped()
-                point_w.header = pwrist.header
-                point_w.point = pwrist.pose.position
-                self.ppub.publish(point_w)
+        try:
+            pwrist = self.tf_buffer.transform(gp, "wrist_3_link")#, timeout=rclpy.duration.Duration(seconds=10))
 
-                pwrist.pose.position.x -= 0.01
-                pwrist.pose.position.z -= 0.197
-                self.posepub.publish(pwrist)
-                print("TF found")
+            pwrist.pose.position.x -= 0.01
+            pwrist.pose.position.z -= 0.197
+            self.posepub.publish(pwrist)
 
-            except TransformException as ex:
-                self.get_logger().info(
-                    f'Could not transform msg.header.frame_id to world: {ex}')
-                return
+            self.get_logger().debug(f"publishing pose at {datetime.now()}")
+        except TransformException as ex:
+            self.get_logger().warn(
+                f'Could not transform msg.header.frame_id to world: {ex}')
+        
+        self.get_logger().debug(f"processing took {time.time()-start:2f}s", )
 
 
 def main(args=None):
@@ -377,7 +369,6 @@ def main(args=None):
     except KeyboardInterrupt:
         node.get_logger().info('Keyboard interrupt, shutting down.\n')
 
-    print("hi")
     # Destroy the node explicitly
     # (optional - otherwise it will be done automatically
     # when the garbage collector destroys the node object)
