@@ -3,6 +3,9 @@ import open3d as o3d
 import rclpy
 import numpy as np
 import time
+import struct
+import ctypes
+from ctypes import *
 from datetime import datetime
 
 import threading 
@@ -16,13 +19,14 @@ from geometry_msgs.msg import TransformStamped, PointStamped, PoseStamped
 from tf2_geometry_msgs import PoseStamped
 from sensor_msgs.msg import JointState
 from moveit_msgs.msg import DisplayRobotState
+import ros2_numpy as rnp
 
 from tf2_ros import TransformBroadcaster
 from rclpy.node import Node
 from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallbackGroup
 
 from sensor_msgs.msg import PointCloud2
-from sensor_msgs_py.point_cloud2 import read_points_numpy
+from sensor_msgs_py.point_cloud2 import read_points_numpy, read_points, create_cloud
 import tf_transformations as tf
 
 from matplotlib import colormaps as cm
@@ -41,6 +45,89 @@ VIEW_PARAMS = {
     "up" : [ 0.9914498309557469, 0.06754698721022645, 0.11164513969108841 ],
     "zoom" : 0.35999999999999965
 }
+
+convert_rgbUint32_to_tuple = lambda rgb_uint32: (
+    (rgb_uint32 & 0x00ff0000)>>16, (rgb_uint32 & 0x0000ff00)>>8, (rgb_uint32 & 0x000000ff)
+)
+convert_rgbFloat_to_tuple = lambda rgb_float: convert_rgbUint32_to_tuple(
+    int(cast(pointer(c_float(rgb_float)), POINTER(c_uint32)).contents.value)
+)
+
+from std_msgs.msg import Header
+from sensor_msgs.msg import PointCloud2, PointField
+# The data structure of each point in ros PointCloud2: 16 bits = x + y + z + rgb
+FIELDS_XYZ = [
+    PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
+    PointField(name='y', offset=4, datatype=PointField.FLOAT32, count=1),
+    PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1),
+]
+FIELDS_XYZRGB = FIELDS_XYZ + \
+    [PointField(name='rgb', offset=12, datatype=PointField.FLOAT32, count=1)]
+
+BIT_MOVE_16 = 2**16
+BIT_MOVE_8 = 2**8
+
+# Convert the datatype of point cloud from Open3D to ROS PointCloud2 (XYZRGB only)
+def convertCloudFromOpen3dToRos(open3d_cloud, frame_id):
+    # Set "header"
+    header = Header()
+    header.stamp = rclpy.time.Time().to_msg()
+    header.frame_id = frame_id
+
+    # Set "fields" and "cloud_data"
+    points=np.asarray(open3d_cloud.points)
+    if not open3d_cloud.colors: # XYZ only
+        fields=FIELDS_XYZ
+        cloud_data=points
+    else: # XYZ + RGB
+        fields=FIELDS_XYZRGB
+        # -- Change rgb color from "three float" to "one 24-byte int"
+        # 0x00FFFFFF is white, 0x00000000 is black.
+        colors = np.floor(np.asarray(open3d_cloud.colors)*255) # nx3 matrix
+        colors = colors[:,0] * BIT_MOVE_16 +colors[:,1] * BIT_MOVE_8 + colors[:,2]  
+        # colors = colors.astype(np.float32)
+        cloud_data=np.c_[points, colors]
+    
+    # create ros_cloud
+    return create_cloud(header, fields, cloud_data)
+
+
+def convertCloudFromRosToOpen3d(ros_cloud):
+    # this method needs a lot of cleaning.
+
+    # Get cloud data from ros_cloud
+    field_names=[field.name for field in ros_cloud.fields]
+    cloud_data = list(read_points(ros_cloud, skip_nans=True, field_names = field_names))
+
+    # Check empty
+    open3d_cloud = o3d.geometry.PointCloud()
+    if len(cloud_data)==0:
+        print("Converting an empty cloud")
+        return None
+
+    # Set open3d_cloud
+    if "rgb" in field_names:
+        IDX_RGB_IN_FIELD=3 # x, y, z, rgb
+        
+        # Get xyz
+        xyz = [(x,y,z) for x,y,z,rgb in cloud_data ] # (why cannot put this line below rgb?)
+
+        # Get rgb
+        # Check whether int or float
+        if type(cloud_data[0][IDX_RGB_IN_FIELD])==float: # if float (from pcl::toROSMsg)
+            rgb = [convert_rgbFloat_to_tuple(rgb) for x,y,z,rgb in cloud_data ]
+        else:
+            rgb = [convert_rgbFloat_to_tuple(rgb) for x,y,z,rgb in cloud_data ]
+
+        # combine
+        open3d_cloud.points = o3d.utility.Vector3dVector(np.array(xyz))
+        open3d_cloud.colors = o3d.utility.Vector3dVector(np.array(rgb)/255.0)
+    else:
+        xyz = [(x,y,z) for x,y,z in cloud_data ] # get xyz
+        open3d_cloud.points = o3d.utility.Vector3d(np.array(xyz))
+
+    # return
+    return open3d_cloud
 
 def sort_list_by_indices(li, idxs):
     li = [li[i] for i in idxs]
@@ -159,6 +246,7 @@ class StackDetector3D(Node):
 
         self.ppub = self.create_publisher(PointStamped, '/grasp_point', 10, callback_group=self.cb_group)
         self.posepub = self.create_publisher(PoseStamped, '/grasp_pose', 10, callback_group=self.cb_group)
+        self.pcdpub = self.create_publisher(PointCloud2, '/segmented_cloud', 0, callback_group=self.cb_group)
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -200,13 +288,10 @@ class StackDetector3D(Node):
         dt = datetime.fromtimestamp(t.nanoseconds // 1000000000)
         self.get_logger().debug(f"got data at {dt}")
         start = time.time()
-
         geoms = []
-        points = read_points_numpy(msg)
-        
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(points[:,:3])
-        pcd.paint_uniform_color([0,0,0])
+
+        pcd = convertCloudFromRosToOpen3d(msg)
+        rgb = np.array(pcd.colors)
 
         # step I: crop cloud
         bb_min, bb_max = [-0.2,-0.25,0], [0.2, 0.25, 0.6]
@@ -288,7 +373,7 @@ class StackDetector3D(Node):
 
         # colors are set based on the tab10 colorscheme, so the cluster order is easily visible in the visulization
         cmap = cm["tab10"]
-        colors = np.array([cmap.colors[l-1] if l != 0 else [0,0,0] for l in labels])
+        colors = np.array([cmap.colors[l-1] if l != 0 else [0,0,0] for i, l in enumerate(labels)]) # TODO this should be real color, not black
 
         # we select points near the cluster center to get a better height estimate (clusters tend to widen around the outer edges of the stack)
         tree = o3d.geometry.KDTreeFlann(pcd)
@@ -351,6 +436,7 @@ class StackDetector3D(Node):
             self.get_logger().warn(
                 f'Could not transform msg.header.frame_id to world: {ex}')
         
+        self.pcdpub.publish(convertCloudFromOpen3dToRos(pcd, frame_id=msg.header.frame_id))
         self.get_logger().debug(f"processing took {time.time()-start:2f}s", )
 
 
