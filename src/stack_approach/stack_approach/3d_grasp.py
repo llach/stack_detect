@@ -75,7 +75,7 @@ class StackGrasp(Node):
             callback_group=self.recbg,
         )
         self.log.info("waiting for IK server")
-        self.traj_client.wait_for_server()
+        self.ik_client.wait_for_service()
         self.log.info("found IK server!")
 
         self.log.info("got joints:")
@@ -114,19 +114,26 @@ class StackGrasp(Node):
         return dict(zip(res.solution.joint_state.name, res.solution.joint_state.position))
 
     def plan_timer(self):
-        if self.pwrist is None or self.current_q is None:
-            print("not planning")
+        if self.pwrist is None:
+            print("no desired wrist pose yet, waiting ...")
+            return
+        if self.current_q is None:
+            print("no joint state yet, waiting ...")
             return
     
         self.pl.acquire()
         
         print("approaching ...")
+        pw = self.get_wrist_pose()
+        pw.pose.position = self.pwrist.pose.position
+        pw.pose.position.x += 0.002
+
         approach_q = self.moveit_IK(self.current_q, self.pwrist)
-        self.send_traj_blocking(approach_q, 5)
+        self.send_traj_blocking(approach_q, 3)
 
         print("inserting ...")
         pinsert = self.get_wrist_pose()
-        pinsert.pose.position.z = 0.055
+        pinsert.pose.position.z = 0.04
 
         insert_q = self.moveit_IK(approach_q, pinsert)
         self.send_traj_blocking(insert_q, 3)
@@ -140,14 +147,19 @@ class StackGrasp(Node):
         plift.pose.position.x = -0.13
 
         lift_q = self.moveit_IK(insert_q, plift)
-        self.send_traj_blocking(lift_q, 3)
+        self.send_traj_blocking(lift_q, 2)
 
         print("retreating")
         pretr = self.get_wrist_pose()
         pretr.pose.position.z = -0.10
 
         retr_q = self.moveit_IK(lift_q, pretr)
-        self.send_traj_blocking(retr_q, 3)
+        self.send_traj_blocking(retr_q, 1.5)
+
+        inp = input("open?")
+        if inp.lower() != "n":
+            print("opening gripper")
+            self.gripper.move_and_wait_for_pos(0, 0, 0)
 
         print("all done!")
         self.destroy_node()

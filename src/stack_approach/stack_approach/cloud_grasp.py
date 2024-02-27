@@ -290,8 +290,16 @@ class StackDetector3D(Node):
         start = time.time()
         geoms = []
 
-        pcd = convertCloudFromRosToOpen3d(msg)
-        rgb = np.array(pcd.colors)
+        try:
+            pcd = convertCloudFromRosToOpen3d(msg)
+            rgb = np.array(pcd.colors)
+        except:
+            self.get_logger().warn("np pcd")
+            return
+
+        if len(pcd.points)<500:
+            self.get_logger().warn("too few points")
+            return
 
         # step I: crop cloud
         bb_min, bb_max = [-0.2,-0.25,0], [0.2, 0.25, 0.6]
@@ -304,7 +312,11 @@ class StackDetector3D(Node):
         pcd, _ = pcd.remove_radius_outlier(nb_points=250, radius=0.02)
 
         # step III: remove supporting plane and points below
-        pcd = remove_points_on_plane_and_below(pcd, log=self.get_logger()) 
+        try:
+            pcd = remove_points_on_plane_and_below(pcd, log=self.get_logger()) 
+        except Exception as e:
+            self.get_logger().warn(f"failed to detect plane\n{e}")
+            return
         pcd, _ = pcd.remove_radius_outlier(nb_points=250, radius=0.02) # cutting can leave small clusters behind, so we filter them again
 
         Rz = tf.rotation_matrix(np.pi/2, [0,0,1])[:3,:3]
@@ -332,7 +344,11 @@ class StackDetector3D(Node):
         points = np.array(pcd.points)
         stack_center = np.mean(points, axis=0)
        
-        C, labels = random_growing_clusters(pcd, np.all([angs<0.4, angs>0.1], axis=0), k=20, min_size=50)
+        try:
+            C, labels = random_growing_clusters(pcd, np.all([angs<0.4, angs>0.1], axis=0), k=20, min_size=50)
+        except:
+            self.get_logger().warn("couldn't find clusters")
+            return
 
         self.get_logger().debug(f"{len(pcd.points)} points | {len(C)} clusters")
         if len(pcd.points) < 500:
@@ -434,7 +450,7 @@ class StackDetector3D(Node):
             pose_wrist.pose.position.z -= 0.197
             self.posepub.publish(pose_wrist)
 
-            self.get_logger().debug(f"publishing pose at {datetime.now()}")
+            self.get_logger().info(f"publishing pose at {datetime.now()}")
         except TransformException as ex:
             self.get_logger().warn(
                 f'Could not transform msg.header.frame_id to world: {ex}')
