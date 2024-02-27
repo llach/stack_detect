@@ -425,11 +425,14 @@ class StackDetector3D(Node):
         self.get_logger().debug(f"publishing point at {datetime.now()}")
 
         try:
-            pwrist = self.tf_buffer.transform(gp, "wrist_3_link")#, timeout=rclpy.duration.Duration(seconds=10))
+            p_wrist = self.tf_buffer.transform(gp, "wrist_3_link")#, timeout=rclpy.duration.Duration(seconds=10))
 
-            pwrist.pose.position.x -= 0.01
-            pwrist.pose.position.z -= 0.197
-            self.posepub.publish(pwrist)
+            pose_wrist = PoseStamped()
+            pose_wrist.header = p_wrist.header
+            pose_wrist.pose.position = p_wrist.point
+            pose_wrist.pose.position.x -= 0.01
+            pose_wrist.pose.position.z -= 0.197
+            self.posepub.publish(pose_wrist)
 
             self.get_logger().debug(f"publishing pose at {datetime.now()}")
         except TransformException as ex:
