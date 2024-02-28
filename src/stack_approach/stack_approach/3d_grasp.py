@@ -126,7 +126,7 @@ class StackGrasp(Node):
         print("approaching ...")
         pw = self.get_wrist_pose()
         pw.pose.position = self.pwrist.pose.position
-        pw.pose.position.x += 0.002
+        pw.pose.position.x -= 0.005
 
         approach_q = self.moveit_IK(self.current_q, self.pwrist)
         self.send_traj_blocking(approach_q, 3)

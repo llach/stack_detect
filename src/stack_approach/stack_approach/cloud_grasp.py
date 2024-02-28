@@ -183,28 +183,27 @@ def remove_points_on_plane_and_below(pcd, log, cam_direction=2):
     inlier_cloud = pcd.select_by_index(inliers)
     inlier_cloud.paint_uniform_color([1.0, 0, 0])
     outlier_cloud = pcd.select_by_index(inliers, invert=True)
-    outlier_pts = np.array(outlier_cloud.points)
-    # geoms += [inlier_cloud, outlier_cloud]
+    points = np.array(pcd.points)
+    geoms += [inlier_cloud, outlier_cloud]
 
     got_ground_plane = cloud_var(inlier_cloud)[cam_direction] >  cloud_var(outlier_cloud)[cam_direction]
 
     if got_ground_plane:
         log.debug("got ground plane")
         # find the highest point in the plane (on whichever axis is up) and remove all points lower than that
-        highest_plane_point = np.max(np.array(inlier_cloud.points)[:,0])
-        higher_indices = np.where(outlier_pts[:,0]>highest_plane_point)[0]
+        highest_plane_point = np.max(np.array(inlier_cloud.points), axis=0)
+        higher_indices = np.where(points[:,0]>highest_plane_point[0])[0]
     else:
         log.debug("got vertical (stack) plane")
         closest_plane_point = np.min(np.array(inlier_cloud.points)[:,cam_direction])
-        points = np.array(pcd.points)
         higher_indices = np.where(points[:,cam_direction]>closest_plane_point)[0]
-    
+
     pcd = pcd.select_by_index(higher_indices)
     geoms.append(pcd)
 
     mesh_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1, origin=[0,0,0])
     geoms.append(mesh_frame)
-   
+
     # o3d.visualization.draw_geoms(
     #     geoms, 
     #     point_show_normal=False,
