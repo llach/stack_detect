@@ -19,6 +19,7 @@ setup(
     tests_require=["pytest"],
     entry_points={
         'console_scripts': [
+            'cloud_normals = stack_detect.cloud_normals:main',
             'towel = stack_detect.towel_detector:main',
         ],
     },

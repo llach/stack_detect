@@ -13,7 +13,6 @@ then
 fi
 
 # Configure and run everything that you need here
-export food=waffle
 echo "Starting the image" 
 
 # Execute the command passed into this entrypoint

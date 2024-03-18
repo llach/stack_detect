@@ -32,7 +32,7 @@ class CtrlPhase:
     INSERTION=3
     LIFT=4
 
-class MjViewer(Node):
+class TableGrasp2D(Node):
     """Subscriber node"""
 
     ik_steps = 1
@@ -344,7 +344,7 @@ def main(args=None):
     rclpy.init(args=args)
 
     executor = MultiThreadedExecutor(num_threads=8)
-    node = MjViewer(executor=executor)
+    node = TableGrasp2D(executor=executor)
 
     executor.add_node(node)
 

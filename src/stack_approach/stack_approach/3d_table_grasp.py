@@ -23,7 +23,7 @@ import tf_transformations as tf
 from moveit_msgs.srv import GetPositionIK
 from stack_approach.robotiq_gripper import RobotiqGripper
 
-class StackGrasp(Node):
+class StackGrasp3D(Node):
     """Subscriber node"""
 
     TRAJ_CTRL = "scaled_joint_trajectory_controller"
@@ -86,7 +86,7 @@ class StackGrasp(Node):
         self.gripper = RobotiqGripper()
         self.gripper.connect("192.168.56.101", 63352)
         self.gripper.activate(auto_calibrate=False)
-        self.gripper.move_and_wait_for_pos(0, 0, 0)   
+        self.gripper.move_and_wait_for_pos(0, 0, 0)
 
         self.log.info("setup done")
 
@@ -126,7 +126,7 @@ class StackGrasp(Node):
         print("approaching ...")
         pw = self.get_wrist_pose()
         pw.pose.position = self.pwrist.pose.position
-        pw.pose.position.x -= 0.005
+        pw.pose.position.x += 0.0
 
         approach_q = self.moveit_IK(self.current_q, self.pwrist)
         self.send_traj_blocking(approach_q, 3)
@@ -209,7 +209,7 @@ def main(args=None):
     rclpy.init(args=args)
 
     executor = MultiThreadedExecutor(num_threads=8)
-    node = StackGrasp(executor=executor)
+    node = StackGrasp3D(executor=executor)
 
     executor.add_node(node)
     executor.spin()

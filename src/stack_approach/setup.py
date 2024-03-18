@@ -19,10 +19,8 @@ setup(
     tests_require=["pytest"],
     entry_points={
         'console_scripts': [
-            'viewer = stack_approach.viewer:main',
-            'cloud = stack_approach.cloud_grasp:main',
-            'grasp = stack_approach.3d_grasp:main',
-            'insert = stack_approach.insert:main',
+            '2d_table_grasp = stack_approach.2d_table_grasp:main',
+            '3d_table_grasp = stack_approach.3d_table_grasp:main',
         ],
     },
 )

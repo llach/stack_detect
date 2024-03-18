@@ -380,6 +380,9 @@ class StackDetector3D(Node):
         if centers[0,1]<stack_center[1]:
             print("didn't find any cluster higher than the stack center.")
             return
+        
+        grasp_point = centers[0].copy()
+        grasp_point[0] = stack_center[0] # we want to grasp in the center of the stack, so we take the center of the whole stack instead of the cluster position
 
         # redo labels
         labels = np.zeros(len(points), dtype=np.int8)
@@ -392,18 +395,20 @@ class StackDetector3D(Node):
 
         # we select points near the cluster center to get a better height estimate (clusters tend to widen around the outer edges of the stack)
         tree = o3d.geometry.KDTreeFlann(pcd)
-        [_, center_idxs, _] = tree.search_radius_vector_3d(centers[0], 0.02)
+        [_, center_idxs, _] = tree.search_radius_vector_3d(grasp_point, 0.02)
         cluster_center_idxs = []
         for ci in center_idxs:
             if ci in C[0]: 
                 cluster_center_idxs.append(ci)
                 colors[ci] = [0,1,1]
         cluster_center_points = points[cluster_center_idxs]
+        if len(cluster_center_idxs)==0:
+            self.get_logger().warn("no grasp point cluster found")
+            return
+
         cluster_center_size   = np.abs(np.max(cluster_center_points, axis=0) - np.min(cluster_center_points, axis=0))
         pcd.colors = o3d.utility.Vector3dVector(colors[:, :3])
 
-        grasp_point = centers[0].copy()
-        grasp_point[0] = stack_center[0] # we want to grasp in the center of the stack, so we take the center of the whole stack instead of the cluster position
         grasp_point[1] = grasp_point[1]-cluster_center_size[1]/2 # the grasp point should be at the bottom of the center, so we subtract half it's height
 
         pcd = pcd.rotate(R.T, center=[0,0,0])
