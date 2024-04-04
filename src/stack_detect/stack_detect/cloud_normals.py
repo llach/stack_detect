@@ -40,7 +40,7 @@ from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSReliabilityPolic
 from rclpy.qos import QoSProfile
 
 VIEW_PARAMS = { 
-    "front" : [ 0.12346865912958778, -0.20876634334886676, -0.97014024970489954 ],
+    "front" : [ 0.12346865912958778, -0.20876634334886676, 0.97014024970489954 ],
     "lookat" : [ 0.012304816534506125, -0.0072898239635080433, 0.21474424582004883 ],
     "up" : [ 0.9914498309557469, 0.06754698721022645, 0.11164513969108841 ],
     "zoom" : 0.35999999999999965
@@ -283,6 +283,10 @@ class StackDetector3D(Node):
         return traj_goal
 
     def point_cb(self, msg):
+        # axes indices AFTER transforming for normal vector estimation
+        HEIGHT_AXS = 0
+        WIDTH_AXS = 1
+        DEPTH_AXS = 2
         t = rclpy.time.Time.from_msg(msg.header.stamp)
         dt = datetime.fromtimestamp(t.nanoseconds // 1000000000)
         self.get_logger().debug(f"got data at {dt}")
@@ -299,12 +303,13 @@ class StackDetector3D(Node):
         if len(pcd.points)<500:
             self.get_logger().warn("too few points")
             return
-
+        
         # step I: crop cloud
-        bb_min, bb_max = [-0.2,-0.25,0], [0.2, 0.25, 0.6]
+        bb_min, bb_max = [-0.2,-0.2,0], [0.2, 0.2, 0.5]
         aabb = o3d.geometry.AxisAlignedBoundingBox(bb_min, bb_max)
         aabb.color = [1,0,0]
 
+        pcd = pcd.rotate(tf.rotation_matrix(np.pi, [0,0,1])[:3,:3], center=[0,0,0])
         pcd = pcd.crop(aabb)
 
         # # step II: some pcds have a lot of noise, so we remove outliers based on density. not doing so can result in suboptimal plane estimates
@@ -318,33 +323,44 @@ class StackDetector3D(Node):
             return
         pcd, _ = pcd.remove_radius_outlier(nb_points=250, radius=0.02) # cutting can leave small clusters behind, so we filter them again
 
-        Rz = tf.rotation_matrix(np.pi/2, [0,0,1])[:3,:3]
-        Ry = tf.rotation_matrix(np.pi, [0,1,0])[:3,:3]
-        R = Ry@Rz
+        # table
+        # Rz = tf.rotation_matrix(np.pi/2, [0,0,1])[:3,:3]
+        # Ry = tf.rotation_matrix(np.pi, [0,1,0])[:3,:3]
+        # R = Ry@Rz
+
+        # shelf
+        R = tf.rotation_matrix(np.pi, [1,0,0])[:3,:3]
 
         pcd = pcd.rotate(R, center=[0,0,0])
-
         pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamRadius(radius=0.005))
+
         nls = np.array(pcd.normals)[:]
 
         # project normals to xz-plane
-        angs = np.clip(np.arctan2(nls[:,1], nls[:,2]), -np.pi/2, np.pi/2)+(np.pi/2)
+        angs = np.clip(np.arctan2(nls[:,0], nls[:,2]), -np.pi/2, np.pi/2)+(np.pi/2)
         angs /= np.pi
 
-        # color pcd based on angles
-        # sms = cm["Spectral"]
-        # colors = np.array(sms(angs))
+        if np.sum(np.all([angs<0.45, angs>0.05], axis=0)) == 0:
+            self.get_logger().warn("no normals found to match criteria")
+            return
+        
+        # pcd = pcd.rotate(R.T, center=[0,0,0])
 
-        # colors = np.array(pcd.colors)
-        # colors_angles = sms(angs)[:,:3]
-        # for i, ang in enumerate(angs):
-        #     if ang < 0.4 and ang > 0.1: colors[i] = colors_angles[i]
+        # color pcd based on angles
+        sms = cm["magma"]
+        colors = np.array(sms(angs))
+
+        colors = np.array(pcd.colors)
+        colors_angles = sms(angs)[:,:3]
+        for i, ang in enumerate(angs):
+            # colors[i] = colors_angles[i]
+            if ang < 0.45 and ang > 0.05: colors[i] = colors_angles[i]
 
         points = np.array(pcd.points)
         stack_center = np.mean(points, axis=0)
        
         try:
-            C, labels = random_growing_clusters(pcd, np.all([angs<0.4, angs>0.1], axis=0), k=20, min_size=50)
+            C, labels = random_growing_clusters(pcd, np.all([angs<0.45, angs>0.05], axis=0), k=20, min_size=5)
         except:
             self.get_logger().warn("couldn't find clusters")
             return
@@ -366,10 +382,10 @@ class StackDetector3D(Node):
 
         # sort clusters by height and only select the 10 heighest clusters
         centers = np.array([np.mean(cp, axis=0) for cp in Cp])
-        sorted_idxs = np.argsort(centers[:,1])[::-1]
+        sorted_idxs = np.argsort(centers[:,HEIGHT_AXS])[::-1]
 
         centers = centers[sorted_idxs]
-        centers = centers [:10]
+        centers = centers
 
         Cp = sort_list_by_indices(Cp, sorted_idxs)
         Cp = Cp[:10]
@@ -377,12 +393,12 @@ class StackDetector3D(Node):
         C = sort_list_by_indices(C, sorted_idxs)
         C = C[:10]
 
-        if centers[0,1]<stack_center[1]:
+        if centers[0,HEIGHT_AXS]<stack_center[HEIGHT_AXS]:
             print("didn't find any cluster higher than the stack center.")
             return
         
         grasp_point = centers[0].copy()
-        grasp_point[0] = stack_center[0] # we want to grasp in the center of the stack, so we take the center of the whole stack instead of the cluster position
+        # grasp_point[0] = stack_center[] # we want to grasp in the center of the stack, so we take the center of the whole stack instead of the cluster position
 
         # redo labels
         labels = np.zeros(len(points), dtype=np.int8)
@@ -409,11 +425,14 @@ class StackDetector3D(Node):
         cluster_center_size   = np.abs(np.max(cluster_center_points, axis=0) - np.min(cluster_center_points, axis=0))
         pcd.colors = o3d.utility.Vector3dVector(colors[:, :3])
 
-        grasp_point[1] = grasp_point[1]-cluster_center_size[1]/2 # the grasp point should be at the bottom of the center, so we subtract half it's height
+        grasp_point[HEIGHT_AXS] = grasp_point[HEIGHT_AXS]-cluster_center_size[HEIGHT_AXS]/2 # the grasp point should be at the bottom of the center, so we subtract half it's height
+        grasp_point[WIDTH_AXS] = stack_center[WIDTH_AXS]
+        grasp_point[DEPTH_AXS] = stack_center[DEPTH_AXS]
 
-        pcd = pcd.rotate(R.T, center=[0,0,0])
-        stack_center = R.T@stack_center
-        grasp_point = R.T@grasp_point
+        RT = R.T@tf.rotation_matrix(-np.pi, [0,0,1])[:3,:3]
+        pcd = pcd.rotate(RT, center=[0,0,0])
+        stack_center = RT@stack_center
+        grasp_point = RT@grasp_point
 
         grasp_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.005)
         grasp_sphere.translate(grasp_point)
@@ -430,8 +449,9 @@ class StackDetector3D(Node):
         # o3d.visualization.draw_geometries(
         #     geoms, 
         #     point_show_normal=False,
-        #     **VIEW_PARAMS
+        #     # **VIEW_PARAMS
         # )
+        # exit()
         
         gp = PointStamped()
 
