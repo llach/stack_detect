@@ -1,4 +1,6 @@
 """Subscriber module"""
+import os
+import signal
 import rclpy
 import time
 from threading import Event
@@ -39,7 +41,6 @@ class StackGrasp3D(Node):
         self.current_q = None
         self.planning = False
         self.pwrist = None
-        self.plt = self.create_timer(0.5, self.plan_timer, self.mecbg)
 
         self.poseusb = self.create_subscription(PoseStamped, '/grasp_pose', self.pose_cb, 0, callback_group=self.mecbg)
 
@@ -52,7 +53,7 @@ class StackGrasp3D(Node):
         self.traj_client = ActionClient(
             self, 
             FollowJointTrajectory, 
-            "/scaled_joint_trajectory_controller/follow_joint_trajectory",
+            f"/{self.TRAJ_CTRL}/follow_joint_trajectory",
             callback_group=self.recbg
         )
 
@@ -90,6 +91,8 @@ class StackGrasp3D(Node):
 
         self.log.info("setup done")
 
+        self.plt = self.create_timer(0.5, self.plan_timer, self.mecbg)
+
 
     def moveit_IK(self, state, pose, ik_link="wrist_3_link"):
         print("doing IK ... ")
@@ -122,13 +125,14 @@ class StackGrasp3D(Node):
             return
     
         self.pl.acquire()
+        start_q = self.current_q.copy()
         
         print("approaching ...")
         pw = self.get_wrist_pose()
         pw.pose.position = self.pwrist.pose.position
-        pw.pose.position.x += 0.0
+        pw.pose.position.x -= 0.005
 
-        approach_q = self.moveit_IK(self.current_q, self.pwrist)
+        approach_q = self.moveit_IK(start_q, self.pwrist)
         self.send_traj_blocking(approach_q, 3)
 
         print("inserting ...")
@@ -136,34 +140,32 @@ class StackGrasp3D(Node):
         pinsert.pose.position.z = 0.04
 
         insert_q = self.moveit_IK(approach_q, pinsert)
-        self.send_traj_blocking(insert_q, 3)
+        self.send_traj_blocking(insert_q, 1)
 
         print("closing gripper")
-        self.gripper.move_and_wait_for_pos(240, 0, 0)
+        self.gripper.move_and_wait_for_pos(245, 0, 200)
         time.sleep(0.5)
 
         print("lifting")
         plift = self.get_wrist_pose()
-        plift.pose.position.x = -0.13
+        plift.pose.position.x = 0.04
 
         lift_q = self.moveit_IK(insert_q, plift)
-        self.send_traj_blocking(lift_q, 2)
+        self.send_traj_blocking(lift_q, 1)
 
         print("retreating")
         pretr = self.get_wrist_pose()
-        pretr.pose.position.z = -0.10
+        pretr.pose.position.z = -0.1
 
         retr_q = self.moveit_IK(lift_q, pretr)
         self.send_traj_blocking(retr_q, 1.5)
 
-        inp = input("open?")
-        if inp.lower() != "n":
-            print("opening gripper")
-            self.gripper.move_and_wait_for_pos(0, 0, 0)
+        print("moving back to initial pose")
+        self.send_traj_blocking(start_q, 1.5)
 
         print("all done!")
         self.destroy_node()
-        exit(0)
+        self.exe.shutdown()
 
     def get_wrist_pose(self):
         p = PoseStamped()
@@ -208,25 +210,17 @@ def main(args=None):
     """Creates subscriber node and spins it"""
     rclpy.init(args=args)
 
-    executor = MultiThreadedExecutor(num_threads=8)
+    executor = MultiThreadedExecutor(num_threads=4)
     node = StackGrasp3D(executor=executor)
 
     executor.add_node(node)
     executor.spin()
 
-    # executor.add_node(node)
-
-    # try:
-    #     node.get_logger().info('Beginning client, shut down with CTRL-C')
-    #     rclpy.spin(node, executor)
-    # except KeyboardInterrupt:
-    #     node.get_logger().info('Keyboard interrupt, shutting down.\n')
-
     # Destroy the node explicitly
     # (optional - otherwise it will be done automatically
     # when the garbage collector destroys the node object)
     node.destroy_node()
-    rclpy.shutdown()
+    os.kill(os.getpid(), signal.SIGKILL)
 
 
 if __name__ == "__main__":

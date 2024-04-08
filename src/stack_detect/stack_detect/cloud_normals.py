@@ -316,12 +316,11 @@ class StackDetector3D(Node):
         pcd, _ = pcd.remove_radius_outlier(nb_points=250, radius=0.02)
 
         # step III: remove supporting plane and points below
-        try:
-            pcd = remove_points_on_plane_and_below(pcd, log=self.get_logger()) 
-        except Exception as e:
-            self.get_logger().warn(f"failed to detect plane\n{e}")
-            return
-        pcd, _ = pcd.remove_radius_outlier(nb_points=250, radius=0.02) # cutting can leave small clusters behind, so we filter them again
+        # try:
+        #     pcd = remove_points_on_plane_and_below(pcd, log=self.get_logger()) 
+        #     pcd, _ = pcd.remove_radius_outlier(nb_points=250, radius=0.02) # cutting can leave small clusters behind, so we filter them again
+        # except Exception as e:
+        #     self.get_logger().warn(f"failed to detect plane\n{e}")
 
         # table
         # Rz = tf.rotation_matrix(np.pi/2, [0,0,1])[:3,:3]
@@ -360,7 +359,7 @@ class StackDetector3D(Node):
         stack_center = np.mean(points, axis=0)
        
         try:
-            C, labels = random_growing_clusters(pcd, np.all([angs<0.45, angs>0.05], axis=0), k=20, min_size=5)
+            C, labels = random_growing_clusters(pcd, np.all([angs<0.45, angs>0.05], axis=0), k=20, min_size=100)
         except:
             self.get_logger().warn("couldn't find clusters")
             return
@@ -422,12 +421,13 @@ class StackDetector3D(Node):
             self.get_logger().warn("no grasp point cluster found")
             return
 
-        cluster_center_size   = np.abs(np.max(cluster_center_points, axis=0) - np.min(cluster_center_points, axis=0))
+        cluster_center_size = np.abs(np.max(cluster_center_points, axis=0) - np.min(cluster_center_points, axis=0))
         pcd.colors = o3d.utility.Vector3dVector(colors[:, :3])
 
-        grasp_point[HEIGHT_AXS] = grasp_point[HEIGHT_AXS]-cluster_center_size[HEIGHT_AXS]/2 # the grasp point should be at the bottom of the center, so we subtract half it's height
+        grasp_point[HEIGHT_AXS] = grasp_point[HEIGHT_AXS]#-cluster_center_size[HEIGHT_AXS]/2 # the grasp point should be at the bottom of the center, so we subtract half it's height
+        # grasp_point[HEIGHT_AXS] = np.min(Cp[0][:,HEIGHT_AXS])
         grasp_point[WIDTH_AXS] = stack_center[WIDTH_AXS]
-        grasp_point[DEPTH_AXS] = stack_center[DEPTH_AXS]
+        grasp_point[DEPTH_AXS] = grasp_point[DEPTH_AXS]
 
         RT = R.T@tf.rotation_matrix(-np.pi, [0,0,1])[:3,:3]
         pcd = pcd.rotate(RT, center=[0,0,0])
@@ -470,8 +470,8 @@ class StackDetector3D(Node):
             pose_wrist = PoseStamped()
             pose_wrist.header = p_wrist.header
             pose_wrist.pose.position = p_wrist.point
-            pose_wrist.pose.position.x -= 0.01
-            pose_wrist.pose.position.z -= 0.197
+            pose_wrist.pose.position.x += 0.025
+            pose_wrist.pose.position.z -= 0.18
             self.posepub.publish(pose_wrist)
 
             self.get_logger().info(f"publishing pose at {datetime.now()}")
