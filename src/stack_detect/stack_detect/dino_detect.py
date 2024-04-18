@@ -261,7 +261,7 @@ class StackDetectorDINO(Node):
         gp.point.y = p[1]
         gp.point.z = p[2]
 
-        return self.tf_buffer.transform(gp, "wrist_3_link")
+        return self.tf_buffer.transform(gp, target, timeout=rclpy.duration.Duration(seconds=5))
 
     def depth_cb(self, msg):
         self.depth_lock.acquire()
@@ -307,6 +307,10 @@ class StackDetectorDINO(Node):
             cpu_only=self.cpu_only, 
             token_spans=eval(f"{self.token_spans}")
         )
+
+        if len(boxes_filt) == 0:
+            self.get_logger.warn("no boxes found!")
+            return
 
         size = image_pil.size
         W, H = size
@@ -357,12 +361,27 @@ class StackDetectorDINO(Node):
 
         stack_center = np.mean(pcd.points, axis=0)
         stack_center = self.transform_point(stack_center, self.camera_frame, "map")
+
+        pose_wrist = PoseStamped()
+        pose_wrist.header.stamp = self.get_clock().now().to_msg()
+        pose_wrist.header.frame_id = "map"
+        pose_wrist.pose.position.x = stack_center.point.x - 0.15
+        pose_wrist.pose.position.y = stack_center.point.y - 0.60
+        pose_wrist.pose.position.z = stack_center.point.z
         
+        tgt_quat = [0.519, 0.508, 0.491, -0.482]
+        pose_wrist.pose.orientation.x = tgt_quat[0]
+        pose_wrist.pose.orientation.y = tgt_quat[1]
+        pose_wrist.pose.orientation.z = tgt_quat[2]
+        pose_wrist.pose.orientation.w = tgt_quat[3]
+
+        print(stack_center.point)
 
         ##### Publish
         # self.publish_img(self.img_pub, image_with_box)
         # self.publish_img(self.crop_img_pub, img_crop)
         self.ppub.publish(stack_center)
+        self.posepub.publish(pose_wrist)
         self.pcdpub.publish(convertCloudFromOpen3dToRos(pcd, frame_id=self.camera_frame, time=self.get_clock().now().to_msg()))
 
         return
