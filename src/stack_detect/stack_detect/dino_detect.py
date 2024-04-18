@@ -34,6 +34,7 @@ import sensor_msgs_py.point_cloud2 as pc2
 from geometry_msgs.msg import PointStamped, PoseStamped
 from tf2_geometry_msgs import PoseStamped
 
+from tf_transformations import quaternion_matrix
 
 
 FIELDS_XYZ = [
@@ -218,7 +219,7 @@ class StackDetectorDINO(Node):
             CompressedImage, "/camera/color/image_raw/compressed", self.rgb_cb, 0, callback_group=MutuallyExclusiveCallbackGroup()
         )
         self.info_sub = self.create_subscription(
-            CameraInfo, "/camera/aligned_depth_to_color/camera_info", self.info_cb, 0, callback_group=self.cb_group
+            CameraInfo, "/camera/color/camera_info", self.info_cb, 0, callback_group=self.cb_group
         )
 
         self.img_pub = self.create_publisher(CompressedImage, '/segmented_image/compressed', 0, callback_group=self.cb_group)
@@ -269,11 +270,26 @@ class StackDetectorDINO(Node):
         self.depth_lock.release()
 
     def info_cb(self, msg):
-        if self.K is None: self.get_logger().info("got camera calibration")
+        if self.K is None: 
+            self.get_logger().info("got camera calibration")
+        else: return
         self.camera_frame = msg.header.frame_id
         self.K = np.reshape(msg.k, (3,3))
         self.H = msg.height
         self.W = msg.width
+
+        d2o = self.tf_buffer.lookup_transform("camera_depth_optical_frame", "camera_color_optical_frame", self.get_clock().now(), timeout=rclpy.duration.Duration(seconds=5))
+        self.K_ext = quaternion_matrix([
+            d2o.transform.rotation.x,
+            d2o.transform.rotation.y,
+            d2o.transform.rotation.z,
+            d2o.transform.rotation.w,
+        ])
+        self.K_ext[:3,3] = [
+            d2o.transform.translation.x,
+            d2o.transform.translation.y,
+            d2o.transform.translation.z,   
+        ]
 
     def rgb_cb(self, msg): 
         if self.K is None:
@@ -345,12 +361,13 @@ class StackDetectorDINO(Node):
         )
 
         pcd = o3d.geometry.PointCloud.create_from_rgbd_image(
-            rgbd_img,
-            o3d.camera.PinholeCameraIntrinsic(
+            image=rgbd_img,
+            intrinsic=o3d.camera.PinholeCameraIntrinsic(
                 width=self.W,
                 height=self.H,
                 intrinsic_matrix=self.K
-            )
+            ),
+            extrinsic=self.K_ext.T
         )
 
         # print(pcd.colors[0])
@@ -366,7 +383,7 @@ class StackDetectorDINO(Node):
         pose_wrist.header.stamp = self.get_clock().now().to_msg()
         pose_wrist.header.frame_id = "map"
         pose_wrist.pose.position.x = stack_center.point.x - 0.15
-        pose_wrist.pose.position.y = stack_center.point.y - 0.60
+        pose_wrist.pose.position.y = stack_center.point.y - 0.50
         pose_wrist.pose.position.z = stack_center.point.z
         
         tgt_quat = [0.519, 0.508, 0.491, -0.482]
@@ -375,11 +392,9 @@ class StackDetectorDINO(Node):
         pose_wrist.pose.orientation.z = tgt_quat[2]
         pose_wrist.pose.orientation.w = tgt_quat[3]
 
-        print(stack_center.point)
-
         ##### Publish
-        # self.publish_img(self.img_pub, image_with_box)
-        # self.publish_img(self.crop_img_pub, img_crop)
+        self.publish_img(self.img_pub, image_with_box)
+        self.publish_img(self.crop_img_pub, img_crop)
         self.ppub.publish(stack_center)
         self.posepub.publish(pose_wrist)
         self.pcdpub.publish(convertCloudFromOpen3dToRos(pcd, frame_id=self.camera_frame, time=self.get_clock().now().to_msg()))

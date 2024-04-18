@@ -21,6 +21,7 @@ setup(
         'console_scripts': [
             '2d_table_grasp = stack_approach.2d_table_grasp:main',
             '3d_table_grasp = stack_approach.3d_table_grasp:main',
+            'dino_approach = stack_approach.dino_approach:main',
         ],
     },
 )
