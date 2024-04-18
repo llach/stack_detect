@@ -84,7 +84,7 @@ def convertCloudFromOpen3dToRos(open3d_cloud, frame_id):
         # -- Change rgb color from "three float" to "one 24-byte int"
         # 0x00FFFFFF is white, 0x00000000 is black.
         colors = np.floor(np.asarray(open3d_cloud.colors)*255) # nx3 matrix
-        colors = colors[:,0] * BIT_MOVE_16 +colors[:,1] * BIT_MOVE_8 + colors[:,2]  
+        # colors = colors[:,0] * BIT_MOVE_16 +colors[:,1] * BIT_MOVE_8 + colors[:,2]  
         # colors = colors.astype(np.float32)
         cloud_data=np.c_[points, colors]
     
@@ -121,7 +121,7 @@ def convertCloudFromRosToOpen3d(ros_cloud):
 
         # combine
         open3d_cloud.points = o3d.utility.Vector3dVector(np.array(xyz))
-        open3d_cloud.colors = o3d.utility.Vector3dVector(np.array(rgb)/255.0)
+        open3d_cloud.colors = o3d.utility.Vector3dVector(np.array(rgb))
     else:
         xyz = [(x,y,z) for x,y,z in cloud_data ] # get xyz
         open3d_cloud.points = o3d.utility.Vector3d(np.array(xyz))

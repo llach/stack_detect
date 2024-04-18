@@ -21,6 +21,7 @@ setup(
         'console_scripts': [
             'cloud_normals = stack_detect.cloud_normals:main',
             'towel = stack_detect.towel_detector:main',
+            'dino = stack_detect.dino_detect:main',
         ],
     },
 )
