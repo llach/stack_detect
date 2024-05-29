@@ -15,7 +15,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallb
 from rclpy.qos import QoSProfile
 from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSReliabilityPolicy
 
-from std_msgs.msg import Header
+from std_msgs.msg import Header, Int16MultiArray
 from sensor_msgs.msg import PointCloud2, PointField, CompressedImage, CameraInfo, Image as ImageMSG
 
 from tf2_ros.buffer import Buffer
@@ -228,6 +228,7 @@ class StackDetectorDINO(Node):
 
         self.ppub = self.create_publisher(PointStamped, '/stack_center', 10, callback_group=self.cb_group)
         self.posepub = self.create_publisher(PoseStamped, '/approach_pose', 10, callback_group=self.cb_group)
+        self.boxpub = self.create_publisher(Int16MultiArray, '/stack_box', 10, callback_group=self.cb_group)
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -325,7 +326,7 @@ class StackDetectorDINO(Node):
         )
 
         if len(boxes_filt) == 0:
-            self.get_logger.warn("no boxes found!")
+            self.get_logger().warn("no boxes found!")
             return
 
         size = image_pil.size
@@ -377,13 +378,17 @@ class StackDetectorDINO(Node):
         # )
 
         stack_center = np.mean(pcd.points, axis=0)
-        stack_center = self.transform_point(stack_center, self.camera_frame, "map")
+        try:
+            stack_center = self.transform_point(stack_center, self.camera_frame, "map")
+        except:
+            self.log.error("could not transform to map!")
+            return
 
         pose_wrist = PoseStamped()
         pose_wrist.header.stamp = self.get_clock().now().to_msg()
         pose_wrist.header.frame_id = "map"
         pose_wrist.pose.position.x = stack_center.point.x - 0.15
-        pose_wrist.pose.position.y = stack_center.point.y - 0.50
+        pose_wrist.pose.position.y = stack_center.point.y - 0.45
         pose_wrist.pose.position.z = stack_center.point.z
         
         tgt_quat = [0.519, 0.508, 0.491, -0.482]
@@ -393,6 +398,7 @@ class StackDetectorDINO(Node):
         pose_wrist.pose.orientation.w = tgt_quat[3]
 
         ##### Publish
+        self.boxpub.publish(Int16MultiArray(data=[x0, y0, x1, y1]))
         self.publish_img(self.img_pub, image_with_box)
         self.publish_img(self.crop_img_pub, img_crop)
         self.ppub.publish(stack_center)

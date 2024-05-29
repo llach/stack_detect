@@ -479,7 +479,7 @@ class StackDetector3D(Node):
             self.get_logger().warn(
                 f'Could not transform msg.header.frame_id to world: {ex}')
         
-        self.pcdpub.publish(convertCloudFromOpen3dToRos(pcd, frame_id=msg.header.frame_id))
+        # self.pcdpub.publish(convertCloudFromOpen3dToRos(pcd, frame_id=msg.header.frame_id))
         self.get_logger().debug(f"processing took {time.time()-start:2f}s", )
 
 

@@ -108,8 +108,11 @@ class RobotiqGripper:
         var_name, value_str = data.decode(self.ENCODING).split()
         if var_name != variable:
             raise ValueError(f"Unexpected response {data} ({data.decode(self.ENCODING)}): does not match '{variable}'")
-        value = int(value_str)
-        return value
+        try:
+            value = int(value_str)
+            return value
+        except:
+            return -1
 
     @staticmethod
     def _is_ack(data: str):
@@ -186,6 +189,9 @@ class RobotiqGripper:
     def is_active(self):
         """Returns whether the gripper is active."""
         status = self._get_var(self.STA)
+        if status == -1: 
+            print("INCORRECT STATUS RETRIVAL")
+            return False
         return RobotiqGripper.GripperStatus(status) == RobotiqGripper.GripperStatus.ACTIVE
 
     def get_min_position(self) -> int:
