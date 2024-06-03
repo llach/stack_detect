@@ -221,7 +221,7 @@ class MotionHelper:
             ret = self.move_rel(xyz, d, self.get_wrist_pose(), secs)
             if ret: return True
 
-            d = np.random.uniform(d-0.1*d, d+0.1*d)
+            d = np.random.uniform(dist-0.1*d, dist+0.1*d)
 
     
     def move_relative_map(self, xyz, dist, secs=5):
@@ -236,4 +236,4 @@ class MotionHelper:
             )
             if ret: return True
 
-            d = np.random.uniform(d-0.1*d, d+0.1*d)
+            d = np.random.uniform(dist-0.1*d, dist+0.1*d)
