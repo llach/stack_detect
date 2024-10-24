@@ -130,7 +130,8 @@ class StackGrasp3D(Node):
         print("approaching ...")
         pw = self.get_wrist_pose()
         pw.pose.position = self.pwrist.pose.position
-        pw.pose.position.x += 0.02
+        pw.pose.position.x += 0.01
+        pw.pose.position.z -= 0.04
 
         approach_q = self.moveit_IK(start_q, self.pwrist)
         self.send_traj_blocking(approach_q, 3)
