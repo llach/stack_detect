@@ -32,40 +32,52 @@ class PrimitiveApproach(Node):
         self.pl = threading.Lock()
         self.mecbg = MutuallyExclusiveCallbackGroup()
 
-        self.mh = MotionHelper(self, True)
-        self.mh.gripper_pos(int(255*0.27))
+        self.mh = MotionHelper(self, with_gripper=True)
+        self.mh.gripper_pos(int(0))
         self.plt = self.create_service(Empty, "papp", self.approach)
 
         self.grasp_point = None
+        
+        self.grasp_lock = threading.Lock()
         self.gp_sub = self.create_subscription(PointStamped, '/grasp_point', self.gp_cb, 0)
 
     def gp_cb(self, msg):
+        self.grasp_lock.acquire()
         self.grasp_point = msg
-        print("new point", self.grasp_point.header.frame_id, self.grasp_point.point)
+        print("new point", self.grasp_point.header.stamp.sec)
+        self.grasp_lock.release()
 
     def approach(self, req, res):
         if self.mh.current_q is None:
             print("no joint state yet...")
             return res
         
-        if self.mh.current_q is None:
-            print("no joint state yet, waiting ...")
+        if self.grasp_point is None:
+            print("no grasp point yet...")
             return res
+        
+        self.grasp_lock.acquire()
+        gp = self.grasp_point.point
+        sec = self.grasp_point.header.stamp.sec
+        point = [gp.x, gp.y, gp.z]
+        self.grasp_lock.release()
+        
+        print("going to point at time", sec)
         
         # store start pose
         start_q = self.mh.current_q.copy()
 
         # set gripper to correct position
-        self.mh.gripper_pos(int(255*0.27))
+        self.mh.gripper_pos(int(0))
         
-        self.approach_retries()
+        self.approach_retries(point=point)
 
         tt = 1.5
-        self.mh.move_relative_map("z", -0.002, secs=tt)
-        self.mh.move_relative_map("y", -0.012, secs=tt)
+        self.mh.move_relative_map("z", -0.009, secs=tt)
+        self.mh.move_relative_map("y", -0.025, secs=tt)
 
         self.mh.move_relative_map("z", 0.009, secs=tt)
-        self.mh.move_relative_map("y", -0.02, secs=tt)
+        self.mh.move_relative_map("y", -0.03, secs=tt)
 
         self.mh.close_gripper()
         time.sleep(1)
@@ -73,23 +85,24 @@ class PrimitiveApproach(Node):
         self.mh.move_relative_map("z", 0.04, secs=2)
         self.mh.move_relative_map("y", 0.05, secs=2)
 
+        self.mh.send_traj_blocking(start_q, 3)
+        
         time.sleep(1)
         self.mh.open_gripper()
         time.sleep(.5)
-
-        self.mh.send_traj_blocking(start_q, 3)
+        
+        print("DONE")
         
         return res
     
-    def approach_retries(self, orient=[180, 45, 90], ntries=100):
+    def approach_retries(self, point, orient=[180, 45, 90], ntries=100):
         dx, dy, dz = 0, 0, 0
-        gp = self.grasp_point.point
 
         for i in range(ntries):
             gpl = [
-                gp.x + dx, 
-                gp.y + 0.02 + dy, 
-                gp.z - 0.005 + dz
+                point[0] + dx, 
+                point[1] + 0.03 + dy, 
+                point[2] - 0.005 + dz
             ]
             
             print(f"{i} planning to {gpl}")

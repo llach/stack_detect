@@ -1,6 +1,7 @@
 import os
 import cv2
 import time
+import torch
 import rclpy
 import numpy as np
 import open3d as o3d
@@ -18,7 +19,7 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallbackGroup
 
 from std_msgs.msg import Header, Int16MultiArray
-from sensor_msgs.msg import PointCloud2, PointField, CompressedImage, CameraInfo, Image as ImageMSG
+from sensor_msgs.msg import PointCloud2, PointField, CompressedImage, CameraInfo, Image as ImageMSG, CameraInfo
 
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
@@ -150,6 +151,7 @@ class StackDetectorSAM(Node):
             Int16MultiArray, '/stack_box', self.box_cb, 0, callback_group=MutuallyExclusiveCallbackGroup()    
         )
 
+        self.info_pub = self.create_publisher(CameraInfo, '/sam_image/camera_info', 0, callback_group=self.cb_group)
         self.img_pub = self.create_publisher(CompressedImage, '/sam_image/compressed', 0, callback_group=self.cb_group)
         self.pcdpub = self.create_publisher(PointCloud2, '/sam_cloud', 0, callback_group=self.cb_group)
 
@@ -171,15 +173,17 @@ class StackDetectorSAM(Node):
         self.get_logger().info("loading model")
         self.sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
         self.sam.to(device="cuda")
+        print("CUDA DEVICE INFOOOOOOO", torch.cuda.get_device_name(0))
 
         self.get_logger().info("creating mask generator")
         self.mask_generator = SamAutomaticMaskGenerator(
             self.sam,
-            # points_per_side=64,
-            # points_per_batch=32,
+            points_per_side=32,
+            points_per_batch=16,
         )
+        self.processing = False
         self.get_logger().info("setup done!")
-
+    
     def create_pcd(self, rgb, depth):
         rgbd_img = o3d.geometry.RGBDImage.create_from_color_and_depth(
             o3d.geometry.Image(rgb.astype(np.uint8)),
@@ -242,6 +246,8 @@ class StackDetectorSAM(Node):
             d2o.transform.translation.y,
             d2o.transform.translation.z,   
         ]
+        
+        self.info_pub.publish(msg)
 
     def rgb_cb(self, msg): 
         if self.K is None:
@@ -320,6 +326,11 @@ class StackDetectorSAM(Node):
             self.get_logger().warn("no rgb image yet ...")
             return
         
+        if self.processing:
+            print("still working ...")
+            return
+        self.processing = True
+        
         ##### Convert RGB image
         self.img_lock.acquire()
         img = self.bridge.compressed_imgmsg_to_cv2(self.img_msg)
@@ -336,6 +347,7 @@ class StackDetectorSAM(Node):
 
         if len(masks) == 0:
             self.get_logger().warn("no masks found!")
+            self.processing = False
             return
         
         # filter annotations by distance and size
@@ -352,6 +364,7 @@ class StackDetectorSAM(Node):
 
         if len(filtered_masks) == 0:
             self.get_logger().warn("no masks after filtering!")
+            self.processing = False
             return
 
         sorted_masks = sorted(filtered_masks, key=(lambda x: mask_center(x["segmentation"])[0]), reverse=True)
@@ -418,6 +431,8 @@ class StackDetectorSAM(Node):
         pose_wrist.pose.orientation.y = tgt_quat[1]
         pose_wrist.pose.orientation.z = tgt_quat[2]
         pose_wrist.pose.orientation.w = tgt_quat[3]
+        
+        cv2.putText(img,f'{pose_wrist.header.stamp.sec}', [0,30], font, 1,(255,192,203),2,cv2.LINE_AA)
 
         ##### Publish
         self.publish_img(self.img_pub, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
@@ -426,23 +441,25 @@ class StackDetectorSAM(Node):
         self.posepub.publish(pose_wrist)
         self.pcdpub.publish(convertCloudFromOpen3dToRos(line_pcd, frame_id=self.camera_frame, time=self.get_clock().now().to_msg()))
 
+        self.processing = False
+        
         return
 
         # image = cv2.imdecode(msg.data)
 
-        image_pil = Image.fromarray(cv_img).convert("RGB")  # load image
-        image_pil.show()
+        # image_pil = Image.fromarray(cv_img).convert("RGB")  # load image
+        # image_pil.show()
 
-        transform = T.Compose(
-            [
-                T.RandomResize([800], max_size=1333),
-                T.ToTensor(),
-                T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-            ]
-        )
-        image, _ = transform(image_pil, None)  # 3, h, w
+        # transform = T.Compose(
+        #     [
+        #         T.RandomResize([800], max_size=1333),
+        #         T.ToTensor(),
+        #         T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+        #     ]
+        # )
+        # image, _ = transform(image_pil, None)  # 3, h, w
 
-        image_pil.show()
+        # image_pil.show()
   
 
 def main(args=None):
