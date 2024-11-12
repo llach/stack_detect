@@ -1,5 +1,7 @@
 """Setup script for ROS package"""
 from setuptools import setup
+import os
+from glob import glob
 
 PACKAGE_NAME = "stack_approach"
 
@@ -9,6 +11,7 @@ setup(
     packages=[PACKAGE_NAME],
     data_files=[
         ("share/" + PACKAGE_NAME, ["package.xml"]),
+        (os.path.join('share', PACKAGE_NAME, 'launch'), glob('launch/*.py')),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
@@ -26,6 +29,7 @@ setup(
             'primitive = stack_approach.primitive:main',
             'collect_cloud_action = stack_approach.collect_cloud_action:main',
             'record_cloud = stack_approach.record_cloud:main',
+            'move_arm_service = stack_approach.move_arm_service:main',
         ],
     },
 )

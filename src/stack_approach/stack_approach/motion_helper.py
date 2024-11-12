@@ -22,7 +22,7 @@ from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 
 class MotionHelper:
-    TRAJ_CTRL = "scaled_joint_trajectory_controller"
+    TRAJ_CTRL = "joint_trajectory_controller"
 
     def __init__(self, node, with_gripper=True) -> None:
         self.n = node
@@ -73,6 +73,7 @@ class MotionHelper:
         self.ik_client.wait_for_service()
         self.log.info("found IK server!")
 
+        self.with_gripper = with_gripper
         if with_gripper:
             self.log.info("gripper setup")
             self.gripper = RobotiqGripper()
@@ -83,14 +84,23 @@ class MotionHelper:
         self.log.info("MH setup done")
 
     def close_gripper(self):
-        self.gripper.move_and_wait_for_pos(255, 255, 255)
+        if self.with_gripper:
+            self.gripper.move_and_wait_for_pos(255, 255, 255)
+        else:
+            print("ERROR gripper not activated!")
 
     def open_gripper(self):
-        self.gripper.move_and_wait_for_pos(0, 0, 0)
+        if self.with_gripper:
+            self.gripper.move_and_wait_for_pos(0, 0, 0)
+        else:
+            print("ERROR gripper not activated!")
 
     def gripper_pos(self, pos, vel=255, frc=255):
-        return self.gripper.move_and_wait_for_pos(pos, vel, frc)
-
+        if self.with_gripper:
+            return self.gripper.move_and_wait_for_pos(pos, vel, frc)
+        else: 
+            print("ERROR gripper not activated!")
+            
     def moveit_IK(self, pose, state=None, ik_link="wrist_3_link", ntries=10):
         if state is None: state = self.current_q.copy()
 
