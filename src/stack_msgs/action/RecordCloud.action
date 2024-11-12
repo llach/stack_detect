@@ -1,0 +1,9 @@
+# Goal definition
+bool start
+---
+# Result definition
+bool success
+---
+# Feedback definition
+int32 joint_state_samples
+int32 transform_samples

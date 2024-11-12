@@ -24,6 +24,8 @@ setup(
             'dino_approach = stack_approach.dino_approach:main',
             'papp = stack_approach.papp:main',
             'primitive = stack_approach.primitive:main',
+            'collect_cloud_action = stack_approach.collect_cloud_action:main',
+            'record_cloud = stack_approach.collect_cloud:main',
         ],
     },
 )
