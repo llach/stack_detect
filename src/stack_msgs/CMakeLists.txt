@@ -13,6 +13,7 @@ find_package(rosidl_default_generators REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/MoveArm.srv"
+  "srv/StoreData.srv"
   "srv/CloudPose.srv"
   "srv/CloudPoseVary.srv"
   "action/RecordCloud.action"

@@ -10,6 +10,9 @@ from stack_msgs.action import RecordCloud  # Import the renamed action
 import threading
 from datetime import datetime
 
+from stack_msgs.srv import StoreData
+from stack_approach.helpers import transform_to_pose_stamped, pose_to_list
+
 class DataCollectionActionServer(Node):
     def __init__(self, store_dir = f"{os.environ['HOME']}/unstack_cloud"):
         super().__init__('data_collection_action_server')
@@ -31,6 +34,7 @@ class DataCollectionActionServer(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
         # Storage for joint states and transforms
+        self.joint_names = None
         self.joint_states = []
         self.transforms = []
 
@@ -42,6 +46,8 @@ class DataCollectionActionServer(Node):
             10
         )
 
+        self.srv = self.create_service(StoreData, 'store_cloud_data', self.srv_callback)
+
         # Control flags for data collection
         self.collecting_data = False
         print("accepting goals!")
@@ -49,6 +55,7 @@ class DataCollectionActionServer(Node):
     def goal_callback(self, goal_request):
         # Accept all incoming goals
         self.get_logger().info("Received goal request for data collection.")
+        self.clear_buffers()
         return GoalResponse.ACCEPT
 
     def handle_accepted_callback(self, goal_handle):
@@ -59,43 +66,20 @@ class DataCollectionActionServer(Node):
         self.get_logger().info("Cancelling data collection...")
 
         self.collecting_data = False
-        print(f"Nsamples:\njs: {len(self.joint_states)} | tf: {len(self.transforms)}")
-
-        sample_dir = self.store_dir + "/" + datetime.now().strftime("%Y.%m.%d_%H.%M.%S") + "/"
-        os.makedirs(sample_dir)
-
-        with open(sample_dir+"joint_states.json", "w") as f:
-            json.dump(self.joint_states, f)
-
-        with open(sample_dir+"gripper_poses.json", "w") as f:
-            json.dump(self.transforms, f)
-
-        print("done saving.")
-
-        self.clear_buffers()
         return CancelResponse.ACCEPT
 
     def joint_state_callback(self, msg):
         if self.collecting_data:
+            if self.joint_names is None: self.joint_names = msg.name
             # Store joint positions by name
-            self.joint_states.append({
-                "timestamp": int(datetime.now().timestamp()),
-                "joint_states": dict(map(lambda i,j: (i,j),  msg.name, msg.position))
-            })
+            self.joint_states.append(list(msg.position))
 
     def get_transform_data(self):
         try:
             transform = self.tf_buffer.lookup_transform('map', 'wrist_3_link', rclpy.time.Time())
             timestamp = int(datetime.now().timestamp())
-            position = [transform.transform.translation.x,
-                        transform.transform.translation.y,
-                        transform.transform.translation.z]
-            orientation = [transform.transform.rotation.x,
-                           transform.transform.rotation.y,
-                           transform.transform.rotation.z,
-                           transform.transform.rotation.w]
 
-            return {'timestamp': timestamp, 'position': position, 'orientation': orientation}
+            return pose_to_list(transform_to_pose_stamped(transform))
         except Exception as e:
             self.get_logger().warn(f"Transform not found: {e}")
             return None
@@ -107,7 +91,7 @@ class DataCollectionActionServer(Node):
         self.collecting_data = True
 
         # Loop until the goal is canceled
-        r = self.create_rate(10)
+        r = self.create_rate(30)
         while rclpy.ok() and self.collecting_data:
             transform_data = self.get_transform_data()
             if transform_data:
@@ -126,9 +110,6 @@ class DataCollectionActionServer(Node):
         self.collecting_data = False
         self.get_logger().info('Data collection canceled.')
 
-        # Clear data buffers after completion
-        self.clear_buffers()
-
         result = RecordCloud.Result()
         result.success = True
         goal_handle.succeed()
@@ -136,13 +117,42 @@ class DataCollectionActionServer(Node):
 
     def clear_buffers(self):
         """Clear the data buffers for joint states and transforms."""
+        self.joint_names = None
         self.joint_states = []
         self.transforms = []
         self.get_logger().info("Data buffers cleared.")
 
+    def srv_callback(self, req, res):
+        print(f"saving Nsamples:\njs: {len(self.joint_states)} | tf: {len(self.transforms)}")
+
+        sample_dir = req.dir
+
+        try:
+            with open(sample_dir+"joint_states.json", "w") as f:
+                json.dump({
+                    "names": self.joint_names,
+                    "joint_states": self.joint_states
+                }, f)
+
+            with open(sample_dir+"gripper_poses.json", "w") as f:
+                json.dump(self.transforms, f)
+
+            self.clear_buffers()
+            print("done saving.")
+            
+        except Exception as e:
+            self.get_logger().fatal("Couldn't store data:\n"+e)
+            res.success = False
+            return res
+        res.success = True
+        return res
+            
+
 def main(args=None):
     rclpy.init(args=args)
+
     node = DataCollectionActionServer()
+
     executor = MultiThreadedExecutor()
     executor.add_node(node)
 

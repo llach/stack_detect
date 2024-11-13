@@ -1,16 +1,23 @@
+import os
 import rclpy
 import time
+import json
+from datetime import datetime
 
 import rclpy
+import numpy as np
 from rclpy.node import Node
 from rclpy.action import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
+from tf2_ros import TransformListener, Buffer
 
 from geometry_msgs.msg import PoseStamped
 from tf2_geometry_msgs import PoseStamped
 
-from stack_msgs.srv import CloudPose
+from stack_msgs.srv import CloudPose, CloudPoseVary, StoreData
 from stack_msgs.action import RecordCloud
+from stack_approach.helpers import pose_to_list, call_cli_sync
 
 class CloudCollector(Node):
     """Subscriber node"""
@@ -84,110 +91,169 @@ class CloudCollector(Node):
         return p
 
 class DataCollectionActionClient(Node):
-    def __init__(self, min_samples):
+    def __init__(self, store_dir = f"{os.environ['HOME']}/unstack_cloud"):
         super().__init__('data_collection_action_client')
-        self._action_client = ActionClient(self, RecordCloud, 'collect_cloud_data', callback_group=ReentrantCallbackGroup())
-        self.min_samples = min_samples
-        self.executing = False
+        self.store_dir = store_dir
 
-        self.pose_cli = self.create_client(CloudPose, 'get_cloud_pose')
+        self.declare_parameter('min_samples', 30)
+        self.declare_parameter('sampling_radius', 0.02)
+        self.declare_parameter('offset_interval', 0.02)
+
+        self.min_samples = self.get_parameter('min_samples').get_parameter_value().integer_value
+        self.sampling_radius = self.get_parameter('sampling_radius').get_parameter_value().double_value
+        self.offset_interval = self.get_parameter('offset_interval').get_parameter_value().double_value
+
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+
+        self._action_client = ActionClient(self, RecordCloud, 'collect_cloud_data', callback_group=ReentrantCallbackGroup())
+        while not self._action_client.wait_for_server(timeout_sec=1.0):
+            self.get_logger().info('data collection action not available, waiting again...')
+
+        self.pose_cli = self.create_client(CloudPose, 'cloud_pose')
         while not self.pose_cli.wait_for_service(timeout_sec=1.0):
             self.get_logger().info('pose service not available, waiting again...')
 
-    def send_goal(self):
+        self.vary_pose_cli = self.create_client(CloudPoseVary, 'cloud_pose_vary')
+        while not self.vary_pose_cli.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('vary pose service not available, waiting again...')
+
+        self.store_cli = self.create_client(StoreData, "store_cloud_data")
+        while not self.store_cli.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('store data service not available, waiting again...')
+
+        self.n_samples = np.array([0])
+
+        self.get_logger().info('setup done!')
+
+
+    def start_recording(self):
         # Create a goal to start data collection
         goal_msg = RecordCloud.Goal()
         goal_msg.start = True  # Set the start flag
 
-        # Wait for the action server to be available
-        self.get_logger().info('Waiting for action server...')
-        self._action_client.wait_for_server()
-
         # Send the goal
         self.get_logger().info('Sending goal to start data collection...')
-        self._send_goal_future = self._action_client.send_goal_async(
+        send_goal_future = self._action_client.send_goal_async(
             goal_msg,
             feedback_callback=self.feedback_callback
         )
-        self._send_goal_future.add_done_callback(self.goal_response_callback)
+        rclpy.spin_until_future_complete(self, send_goal_future)
 
-    def goal_response_callback(self, future):
-        # Handle the response to the goal
-        goal_handle = future.result()
+        goal_handle = send_goal_future.result()
         if not goal_handle.accepted:
-            self.get_logger().info('Goal rejected by action server.')
-            return
+            self.get_logger().fatal('Goal rejected by action server.')
+            exit(0)
 
         self.get_logger().info('Goal accepted by action server.')
-        self._goal_handle = goal_handle
-
-        # Monitor result of the goal asynchronously
-        self._get_result_future = goal_handle.get_result_async()
-        self._get_result_future.add_done_callback(self.get_result_callback)
+        return goal_handle
 
     def feedback_callback(self, feedback_msg):
-        # Receive feedback from the action server
-        joint_state_samples = feedback_msg.feedback.joint_state_samples
-        transform_samples = feedback_msg.feedback.transform_samples
+        self.n_samples = np.array([
+            feedback_msg.feedback.joint_state_samples,
+            feedback_msg.feedback.transform_samples
+        ])
 
-        # Print feedback
-        # self.get_logger().info(f'Feedback: Joint State Samples: {joint_state_samples}, Transform Samples: {transform_samples}')
+    def stop_recording(self, gh):
+        cancel_future = gh.cancel_goal_async()
+        rclpy.spin_until_future_complete(self, cancel_future)
 
-        # Check if we've collected enough samples
-        if joint_state_samples >= self.min_samples and transform_samples >= self.min_samples:
-            # Prompt user input once min_samples is reached
-            if not self.executing: self.execute_movements()
-
-    def cancel_goal(self):
-        # Cancel the goal on the action server
-        self.get_logger().info('Requesting cancellation of the action...')
-        cancel_future = self._goal_handle.cancel_goal_async()
-        cancel_future.add_done_callback(self.cancel_done_callback)
-
-    def cancel_done_callback(self, future):
-        cancel_response = future.result()
+        cancel_response = cancel_future.result()
         if cancel_response:
             self.get_logger().info('Action successfully canceled.')
         else:
             self.get_logger().info('Failed to cancel the action.')
-
-    def get_result_callback(self, future):
-        result = future.result().result
-        if result.success:
-            self.get_logger().info('Data collection action completed successfully.')
-        else:
-            self.get_logger().info('Data collection action did not complete successfully.')
+            exit(0)
 
     def execute_movements(self):
-        if self.executing: return
+        #### Setup and start recording
+        gh = self.start_recording()
+        print("Got goal:", gh)
 
-        self.get_logger().info(f'Collected {self.min_samples} samples for both joint states and transforms. Moveing the robot.')
-        self.executing = True
-        
+        print(f"waiting for {self.min_samples} samples")
+        while np.any(self.n_samples<self.min_samples): 
+            time.sleep(0.05)
+            rclpy.spin_once(self)
+        print(f"got at least {self.min_samples} samples each: {self.n_samples}")
 
-        for i in range(10):
-            print("calling service .........")
-            fut = self.pose_cli.call_async(CloudPose.Request())
-            rclpy.spin_until_future_complete(self, fut)
-            print(fut.result())
+        #### Get grasping and wrist poses
+        cloud_req = CloudPose.Request()
+        cloud_req.offset_interval = self.offset_interval
+        cloud_pose_res = call_cli_sync(self, self.pose_cli, cloud_req)
 
+        offset = cloud_pose_res.offset
+        grasp_pose = self.tf_buffer.transform(cloud_pose_res.grasp_pose, "map")
+        wrist_pose = self.tf_buffer.transform(cloud_pose_res.wrist_pose, "map")
+
+        print("grasp pose", grasp_pose)
+        print("wrist pose", wrist_pose)
+       
+        #### Get varied grasping pose
+        vary_req = CloudPoseVary.Request()
+        vary_req.sampling_radius = self.sampling_radius
+        vary_req.grasp_pose = grasp_pose
+        vary_req.wrist_pose = wrist_pose
+
+        vary_res = call_cli_sync(self, self.vary_pose_cli, vary_req)
+        phi = vary_res.phi
+        theta = vary_res.theta
+        new_grasp_pose = vary_res.new_grasp_pose
+
+
+        # TODO moveit call + exec
+
+        #### Store data
+        self.stop_recording(gh)
         should_save = input("save? [Y/n]")
 
-        # Cancel the goal after user input
-        self.cancel_goal()
+        if should_save.strip().lower() == "n":
+            print("not saving data. bye.")
+            return
 
+        print("saving data ...")
+        
+        sample_dir = self.store_dir + "/" + datetime.now().strftime("%Y.%m.%d_%H.%M.%S") + "/"
+        os.makedirs(sample_dir)
+
+        with open(sample_dir+"misc.json", "w") as f:
+            json.dump({
+                "offset_interval": self.offset_interval,
+                "offset": offset,
+                "sampling_radius": self.sampling_radius,
+                "phi": phi,
+                "theta": theta,
+                "grasp_pose": pose_to_list(grasp_pose),
+                "wrist_pose": pose_to_list(wrist_pose),
+                "new_grasp_pose": pose_to_list(new_grasp_pose),
+            }, f)
+
+        print("store request")
+        store_req = StoreData.Request()
+        store_req.dir = sample_dir
+        call_cli_sync(self, self.store_cli, store_req)
+
+        # TODO store data here
+        # TODO call data store cb
+
+        print("done!")
+
+
+        
 
 def main(args=None):
     rclpy.init(args=args)
-    min_samples = 10  # Set the minimum number of samples required
 
-    action_client = DataCollectionActionClient(min_samples)
-    action_client.send_goal()
+    node = DataCollectionActionClient()
+    executor = MultiThreadedExecutor(num_threads=4)
+    executor.add_node(node)
 
-    rclpy.spin(action_client)
-
-    action_client.destroy_node()
-    rclpy.shutdown()
+    try:
+        node.execute_movements()
+    except KeyboardInterrupt:
+        print("Keyboard Interrupt!")
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 if __name__ == '__main__':
     main()

@@ -1,4 +1,4 @@
-int64 offset_interval
+float32 offset_interval
 ---
 int64 offset
 geometry_msgs/PoseStamped grasp_pose    # grasp point in whatever frame (camera / map). make sure to transform if necessary
