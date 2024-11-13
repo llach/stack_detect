@@ -30,6 +30,7 @@ setup(
             'collect_cloud_action = stack_approach.collect_cloud_action:main',
             'record_cloud = stack_approach.record_cloud:main',
             'move_arm_service = stack_approach.move_arm_service:main',
+            'cloud_pose_vary = stack_approach.cloud_pose_vary:main',
         ],
     },
 )

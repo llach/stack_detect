@@ -30,13 +30,11 @@
 # Author: Denis Stogl
 
 from launch import LaunchDescription
-from launch.conditions import IfCondition
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
-from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, ThisLaunchFileDir, PathJoinSubstitution, LaunchConfiguration
+from launch.conditions import IfCondition, UnlessCondition
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration, LaunchConfiguration
 
 from launch_ros.actions import Node
-from launch_ros.substitutions import FindPackageShare
 
 def generate_launch_description():
     # Declare arguments
@@ -60,6 +58,23 @@ def generate_launch_description():
             name='test_srv',
             output="screen",
             condition=IfCondition(sim),
+        ),
+    )
+    nodes_to_start.append(
+        Node(
+            package='stack_detect',
+            executable='cloud_normals',
+            name='cloud_normals',
+            output="screen",
+            condition=UnlessCondition(sim),
+        ),
+    )
+    nodes_to_start.append(
+        Node(
+            package='stack_approach',
+            executable='cloud_pose_vary',
+            name='cloud_pose_vary',
+            output="screen",
         ),
     )
     nodes_to_start.append(

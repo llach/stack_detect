@@ -35,9 +35,12 @@ from tf2_ros import TransformException
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 
+from threading import Lock
 from moveit_msgs.srv import GetPositionIK
 from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSReliabilityPolicy
 from rclpy.qos import QoSProfile
+
+from stack_msgs.srv import CloudPose
 
 VIEW_PARAMS = { 
     "front" : [ 0.12346865912958778, -0.20876634334886676, 0.97014024970489954 ],
@@ -212,7 +215,9 @@ def remove_points_on_plane_and_below(pcd, log, cam_direction=2):
 
     return pcd
 
-
+HEIGHT_AXS = 0
+WIDTH_AXS = 1
+DEPTH_AXS = 2
 class StackDetector3D(Node):
     """Subscriber node"""
 
@@ -247,8 +252,14 @@ class StackDetector3D(Node):
         self.posepub = self.create_publisher(PoseStamped, '/grasp_pose', 10, callback_group=self.cb_group)
         self.pcdpub = self.create_publisher(PointCloud2, '/segmented_cloud', 0, callback_group=self.cb_group)
 
+        self.srv = self.create_service(CloudPose, 'cloud_pose', self.pose_srv)
+
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
+
+        self.gp_lock = Lock()
+        self.gp = None
+
 
     def js_callback(self, msg): 
         self.current_q = {jname: q for jname, q in zip(msg.name, msg.position)}
@@ -284,9 +295,7 @@ class StackDetector3D(Node):
 
     def point_cb(self, msg):
         # axes indices AFTER transforming for normal vector estimation
-        HEIGHT_AXS = 0
-        WIDTH_AXS = 1
-        DEPTH_AXS = 2
+        
         t = rclpy.time.Time.from_msg(msg.header.stamp)
         dt = datetime.fromtimestamp(t.nanoseconds // 1000000000)
         self.get_logger().debug(f"got data at {dt}")
@@ -461,17 +470,16 @@ class StackDetector3D(Node):
         gp.point.y = grasp_point[1]
         gp.point.z = grasp_point[2]
 
+        with self.gp_lock:
+            self.gp = gp
+
         self.ppub.publish(gp)
         self.get_logger().debug(f"publishing point at {datetime.now()}")
 
         try:
-            p_wrist = self.tf_buffer.transform(gp, "wrist_3_link")#, timeout=rclpy.duration.Duration(seconds=10))
+            with self.gp_lock:
+               pose_wrist = self.grasp_pose_to_wrist(gp)
 
-            pose_wrist = PoseStamped()
-            pose_wrist.header = p_wrist.header
-            pose_wrist.pose.position = p_wrist.point
-            pose_wrist.pose.position.x += 0.025
-            pose_wrist.pose.position.z -= 0.18
             self.posepub.publish(pose_wrist)
 
             self.get_logger().info(f"publishing pose at {datetime.now()}")
@@ -481,6 +489,40 @@ class StackDetector3D(Node):
         
         # self.pcdpub.publish(convertCloudFromOpen3dToRos(pcd, frame_id=msg.header.frame_id))
         self.get_logger().debug(f"processing took {time.time()-start:2f}s", )
+
+    def grasp_pose_to_wrist(self, gp):
+        p_wrist = self.tf_buffer.transform(gp, "wrist_3_link")#, timeout=rclpy.duration.Duration(seconds=10))
+
+        pose_wrist = PoseStamped()
+        pose_wrist.header = p_wrist.header
+        pose_wrist.pose.position = p_wrist.point
+        pose_wrist.pose.position.x += 0.025
+        pose_wrist.pose.position.z -= 0.18
+
+    def pose_srv(self, req, res):
+        gp = PointStamped()
+        with self.gp_lock:
+
+            gp.header.stamp = self.gp.header.stamp
+            gp.header.frame_id = self.gp.header.frame_id
+            gp.point.x = self.gp.point.x
+            gp.point.y = self.gp.point.y
+            gp.point.z = self.gp.point.z
+
+        offset = np.random.uniform(-req.offset_interval, req.offset_interval)
+        if WIDTH_AXS == 0:
+            gp.point.x += offset
+        elif WIDTH_AXS == 1:
+            gp.point.y += offset
+        elif WIDTH_AXS == 2:
+            gp.point.z += offset
+
+        p_wrist = self.grasp_pose_to_wrist(gp)
+
+        res.offset = offset
+        res.stack_pose = gp
+        res.wrist_pose = p_wrist
+        return res
 
 
 def main(args=None):

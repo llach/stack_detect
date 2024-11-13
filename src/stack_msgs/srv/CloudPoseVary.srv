@@ -1,0 +1,7 @@
+float32 sampling_radius
+geometry_msgs/PoseStamped wrist_pose
+geometry_msgs/PoseStamped grasp_pose
+---
+float32 phi
+float32 theta
+geometry_msgs/PoseStamped new_grasp_pose
