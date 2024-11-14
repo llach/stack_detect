@@ -131,20 +131,20 @@ class StackGrasp3D(Node):
         pw = self.get_wrist_pose()
         pw.pose.position = self.pwrist.pose.position
         pw.pose.position.x += 0.01
-        pw.pose.position.z -= 0.04
+        pw.pose.position.z -= 0.02
 
         approach_q = self.moveit_IK(start_q, self.pwrist)
         self.send_traj_blocking(approach_q, 3)
 
         print("inserting ...")
         pinsert = self.get_wrist_pose()
-        pinsert.pose.position.z = 0.04
+        pinsert.pose.position.z = 0.05
 
         insert_q = self.moveit_IK(approach_q, pinsert)
         self.send_traj_blocking(insert_q, 1)
 
         print("closing gripper")
-        self.gripper.move_and_wait_for_pos(245, 0, 200)
+        self.gripper.move_and_wait_for_pos(235, 0, 240)
         time.sleep(0.5)
 
         print("lifting")

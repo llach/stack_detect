@@ -73,7 +73,7 @@ class PrimitiveApproach(Node):
         self.approach_retries(point=point)
 
         tt = 1.5
-        self.mh.move_relative_map("z", -0.009, secs=tt)
+        self.mh.move_relative_map("z", -0.008, secs=tt)
         self.mh.move_relative_map("y", -0.025, secs=tt)
 
         self.mh.move_relative_map("z", 0.009, secs=tt)
