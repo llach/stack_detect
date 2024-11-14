@@ -5,6 +5,7 @@ import cv2
 
 import numpy as np
 
+import skvideo.io
 from rclpy.node import Node
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.executors import MultiThreadedExecutor
@@ -40,6 +41,31 @@ def msg2tuple(msg, msgtype):
         return (t, img)
 
     assert False, f"unknown message type \"{msgtype}\""
+
+def get_obj_size(obj):
+    marked = {id(obj)}
+    obj_q = [obj]
+    sz = 0
+
+    while obj_q:
+        sz += sum(map(sys.getsizeof, obj_q))
+
+        # Lookup all the object referred to by the object in obj_q.
+        # See: https://docs.python.org/3.7/library/gc.html#gc.get_referents
+        all_refr = ((id(o), o) for o in gc.get_referents(*obj_q))
+
+        # Filter object that are already marked.
+        # Using dict notation will prevent repeated objects.
+        new_refr = {o_id: o for o_id, o in all_refr if o_id not in marked and not isinstance(o, type)}
+
+        # The new obj_q will be the ones that were not marked,
+        # and we will update marked with their ids so we will
+        # not traverse them again.
+        obj_q = new_refr.values()
+        marked.update(new_refr.keys())
+
+    return sz
+
 
 class DataCollectionActionServer(Node):
     def __init__(self, store_dir = f"{os.environ['HOME']}/unstack_cloud"):
@@ -237,6 +263,50 @@ class DataCollectionActionServer(Node):
 
             with open(sample_dir+"gripper_poses.json", "w") as f:
                 json.dump(self.transforms, f)
+
+            if not self.sim:
+                print("IMU frames:", len(self.imu_data))
+                with open(f"{sample_dir}/imu.json", "w") as f:
+                    f.write(json.dumps(self.imu_data))
+
+                print("RGB frames:", len(self.rgb_frames), "|", f"{get_obj_size(self.rgb_frames)*10**-6:.2f}MB (raw)")
+                writer = skvideo.io.FFmpegWriter(f"{sample_dir}/rgb.mp4", outputdict={
+                    '-vcodec': 'libx264',  #use the h.264 codec
+                    '-crf': '0',           #set the constant rate factor to 0, which is lossless
+                    '-preset':'veryslow'   #the slower the better compression, in princple, try 
+                                        #other options see https://trac.ffmpeg.org/wiki/Encode/H.264
+                }) 
+                rgb_stamps = []
+                for t, frame in self.rgb_frames:
+                    rgb_stamps.append(t)
+                    if self.downsample: frame = cv2.resize(frame, self.DEST_SIZE, interpolation = cv2.INTER_AREA)
+                    writer.writeFrame(frame)
+                writer.close()
+
+                with open(f"{sample_dir}/rgb_stamps.json", "w") as f:
+                    f.write(json.dumps(rgb_stamps))
+
+                print("Depth frames:", len(self.rgb_frames), "|", f"{get_obj_size(self.depth_frames)*10**-6:.2f}MB (raw)")
+                writer = skvideo.io.FFmpegWriter(f"{sample_dir}/depth.mp4", outputdict={
+                    '-vcodec': 'libx264',  #use the h.264 codec
+                    '-crf': '0',           #set the constant rate factor to 0, which is lossless
+                    '-preset':'veryslow'   #the slower the better compression, in princple, try 
+                                        #other options see https://trac.ffmpeg.org/wiki/Encode/H.264
+                }) 
+                depth_stamps = []
+                for t, dframe in self.depth_frames:
+                    depth_stamps.append(t)
+
+                    dframe = (np.clip(dframe, 0, 2000)/2000*255).astype(np.uint8)
+                    if self.downsample: dframe = cv2.resize(dframe, self.DEST_SIZE, interpolation = cv2.INTER_AREA)
+                    df = np.zeros((224,299,3), dtype=np.uint8)
+                    df[:,:,0] = dframe
+
+                    writer.writeFrame(dframe)
+                writer.close()
+
+                with open(f"{sample_dir}/depth_stamps.json", "w") as f:
+                    f.write(json.dumps(depth_stamps))
 
             self.clear_buffers()
             print("done saving.")
