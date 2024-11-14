@@ -12,70 +12,70 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from tf2_ros import TransformListener, Buffer
 
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, PoseArray, Pose
 from tf2_geometry_msgs import PoseStamped
 
 from stack_msgs.srv import CloudPose, CloudPoseVary, StoreData, MoveArm, GripperService
 from stack_msgs.action import RecordCloud
 from stack_approach.helpers import pose_to_list, call_cli_sync, empty_pose
 
-class CloudCollector(Node):
-    """Subscriber node"""
+# class CloudCollector(Node):
+#     """Subscriber node"""
 
-    def __init__(self, executor=None):
-        self.exe = executor
+#     def __init__(self, executor=None):
+#         self.exe = executor
 
-    def plan_timer(self):
-        if self.pwrist is None:
-            print("no desired wrist pose yet, waiting ...")
-            return
-        if self.current_q is None:
-            print("no joint state yet, waiting ...")
-            return
+#     def plan_timer(self):
+#         if self.pwrist is None:
+#             print("no desired wrist pose yet, waiting ...")
+#             return
+#         if self.current_q is None:
+#             print("no joint state yet, waiting ...")
+#             return
     
-        self.pl.acquire()
-        start_q = self.current_q.copy()
+#         self.pl.acquire()
+#         start_q = self.current_q.copy()
         
-        print("approaching ...")
-        pw = self.get_wrist_pose()
-        pw.pose.position = self.pwrist.pose.position
-        pw.pose.position.x += 0.01
-        pw.pose.position.z -= 0.04
+#         print("approaching ...")
+#         pw = self.get_wrist_pose()
+#         pw.pose.position = self.pwrist.pose.position
+#         pw.pose.position.x += 0.01
+#         pw.pose.position.z -= 0.04
 
-        approach_q = self.moveit_IK(start_q, self.pwrist)
-        self.send_traj_blocking(approach_q, 3)
+#         approach_q = self.moveit_IK(start_q, self.pwrist)
+#         self.send_traj_blocking(approach_q, 3)
 
-        print("inserting ...")
-        pinsert = self.get_wrist_pose()
-        pinsert.pose.position.z = 0.04
+#         print("inserting ...")
+#         pinsert = self.get_wrist_pose()
+#         pinsert.pose.position.z = 0.04
 
-        insert_q = self.moveit_IK(approach_q, pinsert)
-        self.send_traj_blocking(insert_q, 1)
+#         insert_q = self.moveit_IK(approach_q, pinsert)
+#         self.send_traj_blocking(insert_q, 1)
 
-        print("closing gripper")
-        self.gripper.move_and_wait_for_pos(245, 0, 200)
-        time.sleep(0.5)
+#         print("closing gripper")
+#         self.gripper.move_and_wait_for_pos(245, 0, 200)
+#         time.sleep(0.5)
 
-        print("lifting")
-        plift = self.get_wrist_pose()
-        plift.pose.position.x = 0.04
+#         print("lifting")
+#         plift = self.get_wrist_pose()
+#         plift.pose.position.x = 0.04
 
-        lift_q = self.moveit_IK(insert_q, plift)
-        self.send_traj_blocking(lift_q, 1)
+#         lift_q = self.moveit_IK(insert_q, plift)
+#         self.send_traj_blocking(lift_q, 1)
 
-        print("retreating")
-        pretr = self.get_wrist_pose()
-        pretr.pose.position.z = -0.1
+#         print("retreating")
+#         pretr = self.get_wrist_pose()
+#         pretr.pose.position.z = -0.1
 
-        retr_q = self.moveit_IK(lift_q, pretr)
-        self.send_traj_blocking(retr_q, 1.5)
+#         retr_q = self.moveit_IK(lift_q, pretr)
+#         self.send_traj_blocking(retr_q, 1.5)
 
-        print("moving back to initial pose")
-        self.send_traj_blocking(start_q, 1.5)
+#         print("moving back to initial pose")
+#         self.send_traj_blocking(start_q, 1.5)
 
-        print("all done!")
-        self.destroy_node()
-        self.exe.shutdown()
+#         print("all done!")
+#         self.destroy_node()
+#         self.exe.shutdown()
 
 
 class DataCollectionActionClient(Node):
@@ -95,6 +95,8 @@ class DataCollectionActionClient(Node):
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
+
+        self.pose_array_publisher = self.create_publisher(PoseArray, '/record_poses', 10)
 
         self._action_client = ActionClient(self, RecordCloud, 'collect_cloud_data', callback_group=ReentrantCallbackGroup())
         while not self._action_client.wait_for_server(timeout_sec=1.0):
@@ -191,8 +193,15 @@ class DataCollectionActionClient(Node):
         theta = vary_res.theta
         new_grasp_pose = vary_res.new_grasp_pose
 
-        #TODO publish pose array
-        
+        pa = PoseArray()
+        pa.header.stamp = self.get_clock().now().to_msg()
+        pa.header.frame_id = new_grasp_pose.header.frame_id
+        pa.poses = [
+            grasp_pose.pose,
+            wrist_pose.pose,
+            new_grasp_pose.pose
+        ]
+        self.pose_array_publisher.publish(pa)
         
         ####
         #### Motion
