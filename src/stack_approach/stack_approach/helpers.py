@@ -1,5 +1,6 @@
 import rclpy
 from geometry_msgs.msg import PoseStamped, TransformStamped
+import rclpy.clock
 
 def call_cli_sync(node, cli, req):
     fut = cli.call_async(req)
@@ -34,4 +35,17 @@ def transform_to_pose_stamped(tfs: TransformStamped) -> PoseStamped:
     p.pose.position.y = tfs.transform.translation.y
     p.pose.position.z = tfs.transform.translation.z
     p.pose.orientation = tfs.transform.rotation
+    return p
+
+def empty_pose(frame = ""):
+    p = PoseStamped()
+    p.header.stamp = rclpy.clock.Clock().now().to_msg()
+    p.header.frame_id = frame
+    p.pose.position.x = 0.0
+    p.pose.position.y = 0.0
+    p.pose.position.z = 0.0
+    p.pose.orientation.x = 0.0
+    p.pose.orientation.y = 0.0
+    p.pose.orientation.z = 0.0
+    p.pose.orientation.w = 1.0
     return p

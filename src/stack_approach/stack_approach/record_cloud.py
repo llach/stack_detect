@@ -15,9 +15,9 @@ from tf2_ros import TransformListener, Buffer
 from geometry_msgs.msg import PoseStamped
 from tf2_geometry_msgs import PoseStamped
 
-from stack_msgs.srv import CloudPose, CloudPoseVary, StoreData
+from stack_msgs.srv import CloudPose, CloudPoseVary, StoreData, MoveArm, GripperService
 from stack_msgs.action import RecordCloud
-from stack_approach.helpers import pose_to_list, call_cli_sync
+from stack_approach.helpers import pose_to_list, call_cli_sync, empty_pose
 
 class CloudCollector(Node):
     """Subscriber node"""
@@ -77,18 +77,6 @@ class CloudCollector(Node):
         self.destroy_node()
         self.exe.shutdown()
 
-    def empty_wrist_pose(self):
-        p = PoseStamped()
-        p.header.stamp = self.get_clock().now().to_msg()
-        p.header.frame_id = "wrist_3_link"
-        p.pose.position.x = 0.0
-        p.pose.position.y = 0.0
-        p.pose.position.z = 0.0
-        p.pose.orientation.x = 0.0
-        p.pose.orientation.y = 0.0
-        p.pose.orientation.z = 0.0
-        p.pose.orientation.w = 1.0
-        return p
 
 class DataCollectionActionClient(Node):
     def __init__(self, store_dir = f"{os.environ['HOME']}/unstack_cloud"):
@@ -121,6 +109,14 @@ class DataCollectionActionClient(Node):
         self.store_cli = self.create_client(StoreData, "store_cloud_data")
         while not self.store_cli.wait_for_service(timeout_sec=1.0):
             self.get_logger().info('store data service not available, waiting again...')
+
+        self.move_cli = self.create_client(MoveArm, "move_arm")
+        while not self.move_cli.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('move arm service not available, waiting again...')
+
+        self.gripper_cli = self.create_client(GripperService, "gripper")
+        while not self.gripper_cli.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('gripper service not available, waiting again...')
 
         self.n_samples = np.array([0])
 
@@ -184,9 +180,6 @@ class DataCollectionActionClient(Node):
         offset = cloud_pose_res.offset
         grasp_pose = self.tf_buffer.transform(cloud_pose_res.grasp_pose, "map")
         wrist_pose = self.tf_buffer.transform(cloud_pose_res.wrist_pose, "map")
-
-        print("grasp pose", grasp_pose)
-        print("wrist pose", wrist_pose)
        
         #### Get varied grasping pose
         vary_req = CloudPoseVary.Request()
@@ -199,8 +192,76 @@ class DataCollectionActionClient(Node):
         theta = vary_res.theta
         new_grasp_pose = vary_res.new_grasp_pose
 
+        #TODO publish pose array
+        
+        
+        ####
+        #### Motion
+        ####
 
-        # TODO moveit call + exec
+        self.get_logger().info("opening gripper")
+        gr = GripperService.Request()
+        gr.open = True
+        call_cli_sync(self, self.gripper_cli, gr)
+
+        self.get_logger().info("Moving to new gripper pose ...")
+        mr = MoveArm.Request()
+        mr.execute = True
+        mr.target_pose = new_grasp_pose
+        vary_pose_res = call_cli_sync(self, self.move_cli, mr)
+        print(vary_pose_res)
+
+        self.get_logger().info("Moving to grasp pose...")
+        mr = MoveArm.Request()
+        mr.execute = True
+        mr.target_pose = wrist_pose
+        approach_pose_res = call_cli_sync(self, self.move_cli, mr)
+        print(approach_pose_res)
+        
+        self.get_logger().info("inserting ...")
+        pinsert = empty_pose(frame="wrist_3_link")
+        pinsert.pose.position.z = 0.04
+
+        mr = MoveArm.Request()
+        mr.execute = True
+        mr.target_pose = pinsert
+        insert_pose_res = call_cli_sync(self, self.move_cli, mr)
+        print(insert_pose_res)
+
+        self.get_logger().info("closing gripper")
+        gripper_close_time = datetime.now().timestamp()
+        self.get_logger().info(f"{gripper_close_time}")
+        gr = GripperService.Request()
+        gr.open = False
+        call_cli_sync(self, self.gripper_cli, gr)
+
+        self.get_logger().info("lifting")
+        plift = empty_pose(frame="wrist_3_link")
+        plift.pose.position.x = 0.04
+
+        mr = MoveArm.Request()
+        mr.execute = True
+        mr.target_pose = plift
+        lift_pose_res = call_cli_sync(self, self.move_cli, mr)
+        print(lift_pose_res)
+
+        self.get_logger().info("retreating")
+        pretr = empty_pose(frame="wrist_3_link")
+        pretr.pose.position.z = -0.1
+
+        mr = MoveArm.Request()
+        mr.execute = True
+        mr.target_pose = pretr
+        retr_pose_res = call_cli_sync(self, self.move_cli, mr)
+        print(retr_pose_res)
+
+        self.get_logger().info("moving back to initial pose")
+        mr = MoveArm.Request()
+        mr.execute = True
+        mr.q_target = vary_pose_res.q_end
+        call_cli_sync(self, self.move_cli, mr)
+
+        print("all done!")
 
         #### Store data
         self.stop_recording(gh)
@@ -225,15 +286,13 @@ class DataCollectionActionClient(Node):
                 "grasp_pose": pose_to_list(grasp_pose),
                 "wrist_pose": pose_to_list(wrist_pose),
                 "new_grasp_pose": pose_to_list(new_grasp_pose),
+                "gripper_close_time": gripper_close_time
             }, f)
 
         print("store request")
         store_req = StoreData.Request()
         store_req.dir = sample_dir
         call_cli_sync(self, self.store_cli, store_req)
-
-        # TODO store data here
-        # TODO call data store cb
 
         print("done!")
 

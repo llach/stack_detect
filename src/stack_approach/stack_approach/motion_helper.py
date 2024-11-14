@@ -16,15 +16,16 @@ from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallb
 
 from std_msgs.msg import Header
 from moveit_msgs.srv import GetPositionIK
-from stack_approach.robotiq_gripper import RobotiqGripper
 
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 
+from stack_approach.helpers import call_cli_sync
+
 class MotionHelper:
     TRAJ_CTRL = "joint_trajectory_controller"
 
-    def __init__(self, node, with_gripper=True) -> None:
+    def __init__(self, node) -> None:
         self.n = node
         self.log = self.n.get_logger()
 
@@ -63,7 +64,6 @@ class MotionHelper:
         self.log.info("got joints:")
         for j in self.joint_names: self.log.info(f"\t- {j}")
 
-
         self.ik_client = self.n.create_client(
             srv_type=GetPositionIK,
             srv_name="compute_ik",
@@ -73,56 +73,32 @@ class MotionHelper:
         self.ik_client.wait_for_service()
         self.log.info("found IK server!")
 
-        self.with_gripper = with_gripper
-        if with_gripper:
-            self.log.info("gripper setup")
-            self.gripper = RobotiqGripper()
-            self.gripper.connect("192.168.56.101", 63352)
-            self.gripper.activate(auto_calibrate=False)
-            self.gripper.move_and_wait_for_pos(0, 0, 0)
-
         self.log.info("MH setup done")
 
-    def close_gripper(self):
-        if self.with_gripper:
-            self.gripper.move_and_wait_for_pos(255, 255, 255)
-        else:
-            print("ERROR gripper not activated!")
-
-    def open_gripper(self):
-        if self.with_gripper:
-            self.gripper.move_and_wait_for_pos(0, 0, 0)
-        else:
-            print("ERROR gripper not activated!")
-
-    def gripper_pos(self, pos, vel=255, frc=255):
-        if self.with_gripper:
-            return self.gripper.move_and_wait_for_pos(pos, vel, frc)
-        else: 
-            print("ERROR gripper not activated!")
-            
-    def moveit_IK(self, pose, state=None, ik_link="wrist_3_link", ntries=10):
+    def moveit_IK(self, pose, state=None, ik_link="wrist_3_link", ntries=50):
         if state is None: state = self.current_q.copy()
 
-        ik_req = GetPositionIK.Request()
-        ik_req.ik_request.group_name = "ur_manipulator"
-        ik_req.ik_request.robot_state.joint_state.name = list(state.keys())
-        ik_req.ik_request.robot_state.joint_state.position = list(state.values())
-        ik_req.ik_request.ik_link_name = ik_link
-        ik_req.ik_request.pose_stamped = pose
+        for i in range(ntries):
+            self.n.get_logger().info(f"IK try {i}")
+            ik_req = GetPositionIK.Request()
+            ik_req.ik_request.group_name = "ur_manipulator"
+            ik_req.ik_request.robot_state.joint_state.name = list(state.keys())
+            ik_req.ik_request.robot_state.joint_state.position = list(state.values())
+            ik_req.ik_request.ik_link_name = ik_link
+            ik_req.ik_request.pose_stamped = pose
 
-        res = self.ik_client.call(ik_req)
+            res = self.ik_client.call(ik_req)
 
-        if res.error_code.val != 1:
-            print(f"moveit error {res.error_code}")
-            return None
+            if res.error_code.val != 1:
+                # print(f"moveit error {res.error_code}")
+                continue
 
-        rs = DisplayRobotState()
-        rs.state = res.solution
-        self.statepub.publish(rs)
+            rs = DisplayRobotState()
+            rs.state = res.solution
+            self.statepub.publish(rs)
 
-        print("IK done!")
-        return dict(zip(res.solution.joint_state.name, res.solution.joint_state.position))
+            return dict(zip(res.solution.joint_state.name, res.solution.joint_state.position))
+        return None
 
     def js_callback(self, msg):
         self.current_q = {jname: q for jname, q in zip(msg.name, msg.position)}
@@ -134,6 +110,9 @@ class MotionHelper:
         )
 
     def create_traj(self, qfinal, time):
+        if type(qfinal) != dict:
+            qfinal = {jname: q for jname, q in zip(list(self.current_q.keys()), qfinal)}
+        self.n.get_logger().info(f"{qfinal}")
         traj_goal = FollowJointTrajectory.Goal()
         traj_goal.trajectory = JointTrajectory(
             joint_names=list(qfinal.keys()),

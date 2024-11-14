@@ -31,6 +31,7 @@ setup(
             'record_cloud = stack_approach.record_cloud:main',
             'move_arm_service = stack_approach.move_arm_service:main',
             'cloud_pose_vary = stack_approach.cloud_pose_vary:main',
+            'gripper = stack_approach.gripper_service:main',
         ],
     },
 )

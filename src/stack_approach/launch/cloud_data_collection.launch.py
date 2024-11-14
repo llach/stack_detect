@@ -90,9 +90,17 @@ def generate_launch_description():
             package='stack_approach',
             executable='move_arm_service',
             name='move_arm_service',
+            output="screen"
+        ),
+    )
+    nodes_to_start.append(
+        Node(
+            package='stack_approach',
+            executable='gripper',
+            name='gripper',
             output="screen",
             parameters=[{
-                'with_gripper': not sim
+                'sim': sim
             }]
         ),
     )
