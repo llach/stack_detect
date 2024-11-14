@@ -79,7 +79,7 @@ from stack_approach.helpers import pose_to_list, call_cli_sync, empty_pose
 
 
 class DataCollectionActionClient(Node):
-    def __init__(self, store_dir = f"{os.environ['HOME']}/unstack_cloud"):
+    def __init__(self, store_dir = f"{os.environ['HOME']}/repos/unstack_cloud"):
         super().__init__('data_collection_action_client')
         self.store_dir = store_dir
 
