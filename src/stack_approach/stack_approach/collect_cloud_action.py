@@ -73,9 +73,9 @@ class DataCollectionActionServer(Node):
         self.store_dir = store_dir
 
         self.declare_parameter('sim', False)
-        self.declare_parameter('imu_topic', "/imu")
-        self.declare_parameter('image_topic', "/image")
-        self.declare_parameter('depth_topic', "/depth")
+        self.declare_parameter('imu_topic', "/camera/imu")
+        self.declare_parameter('image_topic', "/camera/color/image_raw/compressed")
+        self.declare_parameter('depth_topic', "/camera/aligned_depth_to_color/image_raw")
         self.declare_parameter('video_dims',  [299, 224])
 
         self.sim = self.get_parameter("sim").get_parameter_value().bool_value

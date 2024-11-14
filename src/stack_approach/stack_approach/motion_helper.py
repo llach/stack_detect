@@ -23,7 +23,7 @@ from tf2_ros.transform_listener import TransformListener
 from stack_approach.helpers import call_cli_sync
 
 class MotionHelper:
-    TRAJ_CTRL = "joint_trajectory_controller"
+    TRAJ_CTRL = "scaled_joint_trajectory_controller"
 
     def __init__(self, node) -> None:
         self.n = node
