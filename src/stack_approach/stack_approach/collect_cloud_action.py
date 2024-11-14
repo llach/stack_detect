@@ -76,8 +76,10 @@ class DataCollectionActionServer(Node):
         self.declare_parameter('imu_topic', "/imu")
         self.declare_parameter('image_topic', "/image")
         self.declare_parameter('depth_topic', "/depth")
+        self.declare_parameter('video_dims',  [299, 224])
 
         self.sim = self.get_parameter("sim").get_parameter_value().bool_value
+        self.video_dims = self.get_parameter("video_dims").get_parameter_value().integer_array_value
         self.imu_topic = self.get_parameter("imu_topic").get_parameter_value().string_value
         self.image_topic = self.get_parameter("image_topic").get_parameter_value().string_value
         self.depth_topic = self.get_parameter("depth_topic").get_parameter_value().string_value
@@ -279,7 +281,7 @@ class DataCollectionActionServer(Node):
                 rgb_stamps = []
                 for t, frame in self.rgb_frames:
                     rgb_stamps.append(t)
-                    if self.downsample: frame = cv2.resize(frame, self.DEST_SIZE, interpolation = cv2.INTER_AREA)
+                    if self.downsample: frame = cv2.resize(frame, self.video_dims, interpolation = cv2.INTER_AREA)
                     writer.writeFrame(frame)
                 writer.close()
 
@@ -298,7 +300,7 @@ class DataCollectionActionServer(Node):
                     depth_stamps.append(t)
 
                     dframe = (np.clip(dframe, 0, 2000)/2000*255).astype(np.uint8)
-                    if self.downsample: dframe = cv2.resize(dframe, self.DEST_SIZE, interpolation = cv2.INTER_AREA)
+                    if self.downsample: dframe = cv2.resize(dframe, self.video_dims, interpolation = cv2.INTER_AREA)
                     df = np.zeros((224,299,3), dtype=np.uint8)
                     df[:,:,0] = dframe
 
