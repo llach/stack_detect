@@ -169,7 +169,7 @@ class DataCollectionActionServer(Node):
             self.js_msg = msg
 
     def js_timer(self):
-        if self.collecting_data:
+        if self.collecting_data and self.js_msg is not None:
             # Store joint positions by name
             # self.get_logger().info("JS")
             self.joint_states.append([
