@@ -83,6 +83,9 @@ def generate_launch_description():
             executable='collect_cloud_action',
             name='collect_cloud_action',
             output="screen",
+            parameters=[{
+                'sim': sim
+            }]
         ),
     )
     nodes_to_start.append(

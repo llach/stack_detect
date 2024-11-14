@@ -83,10 +83,12 @@ class DataCollectionActionClient(Node):
         super().__init__('data_collection_action_client')
         self.store_dir = store_dir
 
+        self.declare_parameter('sim', False)
         self.declare_parameter('min_samples', 30)
         self.declare_parameter('sampling_radius', 0.02)
         self.declare_parameter('offset_interval', 0.02)
 
+        self.sim = self.get_parameter("sim").get_parameter_value().bool_value
         self.min_samples = self.get_parameter('min_samples').get_parameter_value().integer_value
         self.sampling_radius = self.get_parameter('sampling_radius').get_parameter_value().double_value
         self.offset_interval = self.get_parameter('offset_interval').get_parameter_value().double_value
@@ -145,10 +147,7 @@ class DataCollectionActionClient(Node):
         return goal_handle
 
     def feedback_callback(self, feedback_msg):
-        self.n_samples = np.array([
-            feedback_msg.feedback.joint_state_samples,
-            feedback_msg.feedback.transform_samples
-        ])
+        self.n_samples = np.array(feedback_msg.feedback.n_samples)
 
     def stop_recording(self, gh):
         cancel_future = gh.cancel_goal_async()
