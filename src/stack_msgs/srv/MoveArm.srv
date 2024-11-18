@@ -3,7 +3,9 @@ string ik_link "wrist_3_link"
 uint8 execution_time 3
 geometry_msgs/PoseStamped target_pose
 float32[] q_target
+string[] name_target
 ---
 bool success
+string[] name_start
 float32[] q_start
 float32[] q_end

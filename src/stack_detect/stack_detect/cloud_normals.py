@@ -105,7 +105,7 @@ def convertCloudFromRosToOpen3d(ros_cloud):
     # Check empty
     open3d_cloud = o3d.geometry.PointCloud()
     if len(cloud_data)==0:
-        print("Converting an empty cloud")
+        # print("Converting an empty cloud")
         return None
 
     # Set open3d_cloud
@@ -306,11 +306,11 @@ class StackDetector3D(Node):
             pcd = convertCloudFromRosToOpen3d(msg)
             rgb = np.array(pcd.colors)
         except:
-            self.get_logger().warn("np pcd")
+            # self.get_logger().warn("np pcd")
             return
 
         if len(pcd.points)<500:
-            self.get_logger().warn("too few points")
+            # self.get_logger().warn("too few points")
             return
         
         # step I: crop cloud
@@ -349,7 +349,7 @@ class StackDetector3D(Node):
         angs /= np.pi
 
         if np.sum(np.all([angs<0.45, angs>0.05], axis=0)) == 0:
-            self.get_logger().warn("no normals found to match criteria")
+            # self.get_logger().warn("no normals found to match criteria")
             return
         
         # pcd = pcd.rotate(R.T, center=[0,0,0])
@@ -370,15 +370,15 @@ class StackDetector3D(Node):
         try:
             C, labels = random_growing_clusters(pcd, np.all([angs<0.45, angs>0.05], axis=0), k=20, min_size=100)
         except:
-            self.get_logger().warn("couldn't find clusters")
+            # self.get_logger().warn("couldn't find clusters")
             return
 
         self.get_logger().debug(f"{len(pcd.points)} points | {len(C)} clusters")
         if len(pcd.points) < 500:
-            self.get_logger().warn("too few points after filtering!")
+            # self.get_logger().warn("too few points after filtering!")
             return
         if len(C)==0:
-            self.get_logger().warn("no clusters found")
+            # self.get_logger().warn("no clusters found")
             return
         
         #####
@@ -402,7 +402,7 @@ class StackDetector3D(Node):
         C = C[:10]
 
         if centers[0,HEIGHT_AXS]<stack_center[HEIGHT_AXS]:
-            print("didn't find any cluster higher than the stack center.")
+            # print("didn't find any cluster higher than the stack center.")
             return
         
         grasp_point = centers[0].copy()
@@ -427,7 +427,7 @@ class StackDetector3D(Node):
                 colors[ci] = [0,1,1]
         cluster_center_points = points[cluster_center_idxs]
         if len(cluster_center_idxs)==0:
-            self.get_logger().warn("no grasp point cluster found")
+            # self.get_logger().warn("no grasp point cluster found")
             return
 
         cluster_center_size = np.abs(np.max(cluster_center_points, axis=0) - np.min(cluster_center_points, axis=0))
@@ -474,7 +474,7 @@ class StackDetector3D(Node):
             self.gp = gp
 
         self.ppub.publish(gp)
-        self.get_logger().debug(f"publishing point at {datetime.now()}")
+        # self.get_logger().debug(f"publishing point at {datetime.now()}")
 
         try:
             with self.gp_lock:
@@ -482,10 +482,10 @@ class StackDetector3D(Node):
 
             self.posepub.publish(pose_wrist)
 
-            self.get_logger().info(f"publishing pose at {datetime.now()}")
+            # self.get_logger().info(f"publishing pose at {datetime.now()}")
         except TransformException as ex:
             self.get_logger().warn(
-                f'Could not transform msg.header.frame_id to world: {ex}')
+                f'Could not transform {msg.header.frame_id} to world: {ex}')
         
         # self.pcdpub.publish(convertCloudFromOpen3dToRos(pcd, frame_id=msg.header.frame_id))
         self.get_logger().debug(f"processing took {time.time()-start:2f}s", )
@@ -495,33 +495,40 @@ class StackDetector3D(Node):
 
         pose_wrist = PoseStamped()
         pose_wrist.header = p_wrist.header
-        pose_wrist.pose.position = p_wrist.point
-        pose_wrist.pose.position.x += 0.025
-        pose_wrist.pose.position.z -= 0.18
+        if type(p_wrist) == PoseStamped:
+            pose_wrist.pose.position = p_wrist.pose.position
+        else:
+            pose_wrist.pose.position = p_wrist.point
+        pose_wrist.pose.position.x += 0.005
+        pose_wrist.pose.position.z -= 0.20
+        
+        return pose_wrist
 
     def pose_srv(self, req, res):
-        gp = PointStamped()
+        gp = PoseStamped()
         with self.gp_lock:
 
             gp.header.stamp = self.gp.header.stamp
             gp.header.frame_id = self.gp.header.frame_id
-            gp.point.x = self.gp.point.x
-            gp.point.y = self.gp.point.y
-            gp.point.z = self.gp.point.z
+            gp.pose.position.x = self.gp.point.x
+            gp.pose.position.y = self.gp.point.y
+            gp.pose.position.z = self.gp.point.z
 
         offset = np.random.uniform(-req.offset_interval, req.offset_interval)
         if WIDTH_AXS == 0:
-            gp.point.x += offset
+            gp.pose.position.x += offset
         elif WIDTH_AXS == 1:
-            gp.point.y += offset
+            gp.pose.position.y += offset
         elif WIDTH_AXS == 2:
-            gp.point.z += offset
+            gp.pose.position.z += offset
 
         p_wrist = self.grasp_pose_to_wrist(gp)
 
         res.offset = offset
-        res.stack_pose = gp
-        res.wrist_pose = p_wrist
+        gp.header.stamp = rclpy.time.Time().to_msg()
+        p_wrist.header.stamp = rclpy.time.Time().to_msg()
+        res.grasp_pose = self.tf_buffer.transform(gp, "map")
+        res.wrist_pose = self.tf_buffer.transform(p_wrist, "map")
         return res
 
 

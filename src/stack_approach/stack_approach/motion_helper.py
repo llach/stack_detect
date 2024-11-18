@@ -110,8 +110,6 @@ class MotionHelper:
         )
 
     def create_traj(self, qfinal, time):
-        if type(qfinal) != dict:
-            qfinal = {jname: q for jname, q in zip(list(self.current_q.keys()), qfinal)}
         traj_goal = FollowJointTrajectory.Goal()
         traj_goal.trajectory = JointTrajectory(
             joint_names=list(qfinal.keys()),

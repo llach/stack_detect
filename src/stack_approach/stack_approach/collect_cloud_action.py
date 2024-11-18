@@ -1,4 +1,6 @@
 import os
+import gc
+import sys
 import json
 import rclpy
 import cv2
@@ -73,12 +75,14 @@ class DataCollectionActionServer(Node):
         self.store_dir = store_dir
 
         self.declare_parameter('sim', False)
+        self.declare_parameter('downsample', True)
         self.declare_parameter('imu_topic', "/camera/imu")
         self.declare_parameter('image_topic', "/camera/color/image_raw/compressed")
         self.declare_parameter('depth_topic', "/camera/aligned_depth_to_color/image_raw")
         self.declare_parameter('video_dims',  [299, 224])
 
         self.sim = self.get_parameter("sim").get_parameter_value().bool_value
+        self.downsample = self.get_parameter("downsample").get_parameter_value().bool_value
         self.video_dims = self.get_parameter("video_dims").get_parameter_value().integer_array_value
         self.imu_topic = self.get_parameter("imu_topic").get_parameter_value().string_value
         self.image_topic = self.get_parameter("image_topic").get_parameter_value().string_value
@@ -179,15 +183,15 @@ class DataCollectionActionServer(Node):
 
     def rgb_cb(self, msg):
         if not self.collecting_data: return
-        self.rgb_frames.append(self.msg2tuple(msg, CompressedImage))
+        self.rgb_frames.append(msg2tuple(msg, CompressedImage))
 
     def depth_cb(self, msg):
         if not self.collecting_data: return
-        self.depth_frames.append(self.msg2tuple(msg, Image))
+        self.depth_frames.append(msg2tuple(msg, Image))
 
     def imu_cb(self, msg):
         if not self.collecting_data: return
-        self.imu_data.append(self.msg2tuple(msg, Imu))
+        self.imu_data.append(msg2tuple(msg, Imu))
 
     def get_transform_data(self):
         try:
@@ -214,16 +218,17 @@ class DataCollectionActionServer(Node):
 
             # Send feedback with the count of collected samples
             feedback_msg = RecordCloud.Feedback()
-            feedback_msg.n_samples = [
+            n_samples = [
                 len(self.joint_states),
                 len(self.transforms)
             ]
             if not self.sim:
-                feedback_msg.n_samples += [
+                n_samples += [
                     len(self.rgb_frames),
                     len(self.depth_frames),
                     len(self.imu_frames)
                 ]
+            feedback_msg.n_samples
 
             goal_handle.publish_feedback(feedback_msg)
 
@@ -267,11 +272,11 @@ class DataCollectionActionServer(Node):
                 json.dump(self.transforms, f)
 
             if not self.sim:
-                print("IMU frames:", len(self.imu_data))
+                self.get_logger().info(f"IMU frames: {len(self.imu_frames)}")
                 with open(f"{sample_dir}/imu.json", "w") as f:
-                    f.write(json.dumps(self.imu_data))
+                    f.write(json.dumps(self.imu_frames))
 
-                print("RGB frames:", len(self.rgb_frames), "|", f"{get_obj_size(self.rgb_frames)*10**-6:.2f}MB (raw)")
+                self.get_logger().info(f"RGB frames: { len(self.rgb_frames)} | {get_obj_size(self.rgb_frames)*10**-6:.2f}MB (raw)")
                 writer = skvideo.io.FFmpegWriter(f"{sample_dir}/rgb.mp4", outputdict={
                     '-vcodec': 'libx264',  #use the h.264 codec
                     '-crf': '0',           #set the constant rate factor to 0, which is lossless
@@ -288,7 +293,7 @@ class DataCollectionActionServer(Node):
                 with open(f"{sample_dir}/rgb_stamps.json", "w") as f:
                     f.write(json.dumps(rgb_stamps))
 
-                print("Depth frames:", len(self.rgb_frames), "|", f"{get_obj_size(self.depth_frames)*10**-6:.2f}MB (raw)")
+                self.get_logger().info(f"Depth frames: {len(self.rgb_frames)}| {get_obj_size(self.depth_frames)*10**-6:.2f}MB (raw)")
                 writer = skvideo.io.FFmpegWriter(f"{sample_dir}/depth.mp4", outputdict={
                     '-vcodec': 'libx264',  #use the h.264 codec
                     '-crf': '0',           #set the constant rate factor to 0, which is lossless
@@ -311,7 +316,7 @@ class DataCollectionActionServer(Node):
                     f.write(json.dumps(depth_stamps))
 
             self.clear_buffers()
-            print("done saving.")
+            self.get_logger().info("done saving.")
             
         except Exception as e:
             self.get_logger().fatal("Couldn't store data:\n"+e)

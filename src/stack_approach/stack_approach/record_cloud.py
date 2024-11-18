@@ -17,7 +17,7 @@ from tf2_geometry_msgs import PoseStamped
 
 from stack_msgs.srv import CloudPose, CloudPoseVary, StoreData, MoveArm, GripperService
 from stack_msgs.action import RecordCloud
-from stack_approach.helpers import pose_to_list, call_cli_sync, empty_pose
+from stack_approach.helpers import pose_to_list, call_cli_sync, empty_pose, transform_to_pose_stamped
 
 # class CloudCollector(Node):
 #     """Subscriber node"""
@@ -85,7 +85,7 @@ class DataCollectionActionClient(Node):
 
         self.declare_parameter('sim', False)
         self.declare_parameter('min_samples', 30)
-        self.declare_parameter('sampling_radius', 0.02)
+        self.declare_parameter('sampling_radius', 0.001)
         self.declare_parameter('offset_interval', 0.02)
 
         self.sim = self.get_parameter("sim").get_parameter_value().bool_value
@@ -179,27 +179,30 @@ class DataCollectionActionClient(Node):
         cloud_pose_res = call_cli_sync(self, self.pose_cli, cloud_req)
 
         offset = cloud_pose_res.offset
-        grasp_pose = self.tf_buffer.transform(cloud_pose_res.grasp_pose, "map")
-        wrist_pose = self.tf_buffer.transform(cloud_pose_res.wrist_pose, "map")
+        grasp_pose = cloud_pose_res.grasp_pose
+        grasp_wrist_pose = cloud_pose_res.wrist_pose
        
         #### Get varied grasping pose
+        
+        current_wrist_pose = transform_to_pose_stamped(self.tf_buffer.lookup_transform('map', 'wrist_3_link', rclpy.time.Time()))
         vary_req = CloudPoseVary.Request()
         vary_req.sampling_radius = self.sampling_radius
         vary_req.grasp_pose = grasp_pose
-        vary_req.wrist_pose = wrist_pose
+        vary_req.wrist_pose = current_wrist_pose
 
         vary_res = call_cli_sync(self, self.vary_pose_cli, vary_req)
         phi = vary_res.phi
         theta = vary_res.theta
-        new_grasp_pose = vary_res.new_grasp_pose
+        new_wrist_pose = vary_res.new_grasp_pose
 
         pa = PoseArray()
         pa.header.stamp = self.get_clock().now().to_msg()
-        pa.header.frame_id = new_grasp_pose.header.frame_id
+        pa.header.frame_id = new_wrist_pose.header.frame_id
         pa.poses = [
             grasp_pose.pose,
-            wrist_pose.pose,
-            new_grasp_pose.pose
+            grasp_wrist_pose.pose,
+            current_wrist_pose.pose,
+            new_wrist_pose.pose
         ]
         self.pose_array_publisher.publish(pa)
         
@@ -212,17 +215,17 @@ class DataCollectionActionClient(Node):
         gr.open = True
         call_cli_sync(self, self.gripper_cli, gr)
 
-        self.get_logger().info("Moving to new gripper pose ...")
-        mr = MoveArm.Request()
-        mr.execute = True
-        mr.target_pose = new_grasp_pose
-        vary_pose_res = call_cli_sync(self, self.move_cli, mr)
-        print(vary_pose_res)
+        # self.get_logger().info("Moving to new gripper pose ...")
+        # mr = MoveArm.Request()
+        # mr.execute = True
+        # mr.target_pose = new_wrist_pose
+        # vary_pose_res = call_cli_sync(self, self.move_cli, mr)
+        # print(vary_pose_res)
 
         self.get_logger().info("Moving to grasp pose...")
         mr = MoveArm.Request()
         mr.execute = True
-        mr.target_pose = wrist_pose
+        mr.target_pose = grasp_wrist_pose
         approach_pose_res = call_cli_sync(self, self.move_cli, mr)
         print(approach_pose_res)
         
@@ -266,7 +269,8 @@ class DataCollectionActionClient(Node):
         self.get_logger().info("moving back to initial pose")
         mr = MoveArm.Request()
         mr.execute = True
-        mr.q_target = vary_pose_res.q_end
+        mr.name_target = approach_pose_res.name_start
+        mr.q_target = approach_pose_res.q_start
         call_cli_sync(self, self.move_cli, mr)
 
         print("all done!")
@@ -292,8 +296,9 @@ class DataCollectionActionClient(Node):
                 "phi": phi,
                 "theta": theta,
                 "grasp_pose": pose_to_list(grasp_pose),
-                "wrist_pose": pose_to_list(wrist_pose),
-                "new_grasp_pose": pose_to_list(new_grasp_pose),
+                "grasp_wrist_pose": pose_to_list(grasp_wrist_pose),
+                "new_wrist_pose": pose_to_list(new_wrist_pose),
+                "current_wrist_pose": pose_to_list(current_wrist_pose),
                 "gripper_close_time": gripper_close_time
             }, f)
 

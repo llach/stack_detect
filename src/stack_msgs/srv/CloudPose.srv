@@ -1,5 +1,5 @@
 float32 offset_interval
 ---
-int64 offset
+float32 offset
 geometry_msgs/PoseStamped grasp_pose    # grasp point in whatever frame (camera / map). make sure to transform if necessary
 geometry_msgs/PoseStamped wrist_pose    # grasp point in wrist frame with wrist offset (desired wrist pose to reach grasping point)

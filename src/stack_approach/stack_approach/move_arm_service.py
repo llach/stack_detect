@@ -19,7 +19,8 @@ class MoveArmService(Node):
 
         if len(request.q_target) > 0:
             self.get_logger().info(f"executing q_target {request.q_target} ...")
-            self.mh.send_traj_blocking(request.q_target, request.execution_time)
+            q_target = {jname: q for jname, q in zip(request.name_target, request.q_target)}
+            self.mh.send_traj_blocking(q_target, request.execution_time)
             time.sleep(0.5)
             self.get_logger().info("done")
             response.success = True
@@ -50,6 +51,7 @@ class MoveArmService(Node):
             
         print(q_start, q_target)
         response.success = True
+        response.name_start = list(q_start.keys())
         response.q_start = list(q_start.values())
         response.q_end = list(q_target.values())
         return response

@@ -16,7 +16,7 @@ class GripperServiceClient(Node):
 
         self.srv = self.create_service(GripperService, 'gripper', self.srv_callback)
         if not self.sim:
-            self.log.info("gripper setup")
+            self.get_logger().info("gripper setup")
             self.gripper = RobotiqGripper()
             self.gripper.connect("192.168.56.101", 63352)
             self.gripper.activate(auto_calibrate=False)
