@@ -4,7 +4,7 @@ import time
 import torch
 import rclpy
 import numpy as np
-import open3d as o3d
+# import open3d as o3d
 from ctypes import * 
 
 from cv_bridge import CvBridge
@@ -31,7 +31,9 @@ from tf2_geometry_msgs import PoseStamped
 
 from tf_transformations import quaternion_matrix
 
-from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
+# from segment_anything import sam_model_registry, SamAutomaticMaskGenerator
+from sam2.build_sam import build_sam2
+from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
 
 FIELDS_XYZ = [
     PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
@@ -171,35 +173,44 @@ class StackDetectorSAM(Node):
         sam_checkpoint, model_type = f"{os.environ['HOME']}/repos/ckp/sam_vit_l_0b3195.pth", "vit_l"
 
         self.get_logger().info("loading model")
-        self.sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
-        self.sam.to(device="cuda")
-        print("CUDA DEVICE INFOOOOOOO", torch.cuda.get_device_name(0))
+        # self.sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
+        # self.sam.to(device="cpu")
 
-        self.get_logger().info("creating mask generator")
-        self.mask_generator = SamAutomaticMaskGenerator(
-            self.sam,
-            points_per_side=32,
-            points_per_batch=16,
+        checkpoint = f"{os.environ['HOME']}/repos/ckp/sam2.1_hiera_large.pt"
+        model_cfg = "configs/sam2.1/sam2.1_hiera_l.yaml"
+        self.mask_generator = SAM2AutomaticMaskGenerator(
+            build_sam2(model_cfg, checkpoint),
+            # points_per_side=64,
+            # points_per_batch=128,
+            # pred_iou_thresh=0.5,
         )
+        # print("CUDA DEVICE INFOOOOOOO", torch.cuda.get_device_name(0))
+
+        # self.get_logger().info("creating mask generator")
+        # self.mask_generator = SamAutomaticMaskGenerator(
+        #     self.sam,
+        #     points_per_side=32,
+        #     points_per_batch=16,
+        # )
         self.processing = False
         self.get_logger().info("setup done!")
     
-    def create_pcd(self, rgb, depth):
-        rgbd_img = o3d.geometry.RGBDImage.create_from_color_and_depth(
-            o3d.geometry.Image(rgb.astype(np.uint8)),
-            o3d.geometry.Image(depth.astype(np.uint16)),
-            convert_rgb_to_intensity=False
-        )
+    # def create_pcd(self, rgb, depth):
+    #     rgbd_img = o3d.geometry.RGBDImage.create_from_color_and_depth(
+    #         o3d.geometry.Image(rgb.astype(np.uint8)),
+    #         o3d.geometry.Image(depth.astype(np.uint16)),
+    #         convert_rgb_to_intensity=False
+    #     )
 
-        return o3d.geometry.PointCloud.create_from_rgbd_image(
-            image=rgbd_img,
-            intrinsic=o3d.camera.PinholeCameraIntrinsic(
-                width=self.W,
-                height=self.H,
-                intrinsic_matrix=self.K
-            ),
-            extrinsic=self.K_ext.T
-        )
+    #     return o3d.geometry.PointCloud.create_from_rgbd_image(
+    #         image=rgbd_img,
+    #         intrinsic=o3d.camera.PinholeCameraIntrinsic(
+    #             width=self.W,
+    #             height=self.H,
+    #             intrinsic_matrix=self.K
+    #         ),
+    #         extrinsic=self.K_ext.T
+    #     )
 
     def publish_img(self, pub, img):
         msg = self.bridge.cv2_to_compressed_imgmsg(cv2.cvtColor(np.array(img), cv2.COLOR_BGR2RGB), "jpeg")
@@ -339,10 +350,16 @@ class StackDetectorSAM(Node):
         
         ##### Run SAM
         x0, y0, x1, y1 = msg.data
-        img_crop = img[y0:y1,x0:x1]
+        img_crop = np.rot90(img[y0:y1,x0:x1], k=3)
+
+        # self.publish_img(self.img_pub, cv2.cvtColor(img_crop, cv2.COLOR_RGB2BGR))
+        # return
 
         start = time.time()
-        masks = self.mask_generator.generate(img_crop)
+        # with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
+            # self.mask_generator.set_image(img_crop)
+            # masks, _, _ = self.mask_generator.predict()
+        masks = self.mask_generator.generate(img_crop.copy())
         self.get_logger().info(f"took {time.time()-start}; found {len(masks)} masks")
 
         if len(masks) == 0:
@@ -350,35 +367,36 @@ class StackDetectorSAM(Node):
             self.processing = False
             return
         
+        print(masks)
         # filter annotations by distance and size
         self.depth_lock.acquire()
         depth = self.bridge.imgmsg_to_cv2(self.depth_msg)
         self.depth_lock.release()
-        depth_crop = depth[y0:y1,x0:x1]
+        depth_crop = np.rot90(depth[y0:y1,x0:x1], k=3)
         h = y1-y0
         
-        dists = np.array([np.sum(depth_crop[m["segmentation"]])/m["area"] for m in masks])
-        mean_dist = 1.5*np.median(dists)
-        centers = [mask_center(sa["segmentation"]) for sa in masks]
-        filtered_masks = [m for c, m in zip(centers, masks) if np.sum(depth_crop[m["segmentation"]])/m["area"] < mean_dist and m["area"] > 5000 and c[1]>0.25*h and c[1]<0.75*h]
+        # dists = np.array([np.sum(depth_crop[m["segmentation"]])/m["area"] for m in masks])
+        # mean_dist = 1.5*np.median(dists)
+        # centers = [mask_center(sa["segmentation"]) for sa in masks]
+        # filtered_masks = [m for c, m in zip(centers, masks) if np.sum(depth_crop[m["segmentation"]])/m["area"] < mean_dist and m["area"] > 5000 and c[1]>0.25*h and c[1]<0.75*h]
 
-        if len(filtered_masks) == 0:
-            self.get_logger().warn("no masks after filtering!")
-            self.processing = False
-            return
+        # if len(filtered_masks) == 0:
+        #     self.get_logger().warn("no masks after filtering!")
+        #     self.processing = False
+        #     return
 
-        sorted_masks = sorted(filtered_masks, key=(lambda x: mask_center(x["segmentation"])[0]), reverse=True)
-        centers = [mask_center(sa["segmentation"]) for sa in sorted_masks]
+        # sorted_masks = sorted(filtered_masks, key=(lambda x: mask_center(x["segmentation"])[0]), reverse=False)
+        # centers = [mask_center(sa["segmentation"]) for sa in sorted_masks]
 
-        for c in centers: print(c)
-        mask_img = mask_image([sorted_masks[0]]).astype(np.uint8)
+        # for c in centers: print(c)
+        mask_img = mask_image(masks).astype(np.uint8)
 
         # get topmost cluster
-        clust = sorted_masks[0]["segmentation"]
-        # select bottom pixels
-        max_idxs = np.argmax(clust, axis=1) - 1
-        # paint them pink
-        for i, m in enumerate(max_idxs): mask_img[i,m] = [255, 0, 255]
+        # clust = sorted_masks[0]["segmentation"]
+        # # select bottom pixels
+        # max_idxs = np.argmax(clust, axis=1) - 1
+        # # paint them pink
+        # for i, m in enumerate(max_idxs): mask_img[i,m] = [255, 0, 255]
 
         # superimpose masks on cropped image
         msk_w = 0.6
@@ -386,21 +404,21 @@ class StackDetectorSAM(Node):
 
         # annotate cluster indices in their centers
         font = cv2.FONT_HERSHEY_SIMPLEX
-        for i, c in enumerate(centers):
-            cv2.putText(overlay,f'{i}', c, font, 1,(255,255,255),2,cv2.LINE_AA)
+        # for i, c in enumerate(centers):
+        #     cv2.putText(overlay,f'{i}', c, font, 1,(0,0,0),2,cv2.LINE_AA)
         
         # insert overlayed image crop onto real image
-        img[y0:y1,x0:x1] = overlay
+        # img[y0:y1,x0:x1] = overlay
 
-        #### Pointcloud
-        limg = 255*np.ones_like(img)
-        for i, m in enumerate(max_idxs): limg[i,m] = [255, 0, 255]
+        # #### Pointcloud
+        # limg = 255*np.ones_like(img)
+        # for i, m in enumerate(max_idxs): limg[i,m] = [255, 0, 255]
 
-        ldepth = np.infty*np.ones_like(depth)
-        for i, m in enumerate(max_idxs): ldepth[y0:y1,x0:x1][i,m] = depth[y0:y1,x0:x1][i,m]
+        # ldepth = np.infty*np.ones_like(depth)
+        # for i, m in enumerate(max_idxs): ldepth[y0:y1,x0:x1][i,m] = depth[y0:y1,x0:x1][i,m]
 
-        line_pcd = self.create_pcd(limg, ldepth)
-        line_pcd.paint_uniform_color([0,0,1])
+        # line_pcd = self.create_pcd(limg, ldepth)
+        # line_pcd.paint_uniform_color([0,0,1])
 
 
         # masked_depth = np.infty*np.ones_like(depth)
@@ -411,35 +429,35 @@ class StackDetectorSAM(Node):
         # line_pcd = pcd.select_by_index(np.where(np.array(pcd.colors)==[0,0,1])[0])
         # print(len(line_pcd.points))
        
-        line_center = np.median(line_pcd.points, axis=0)
+        # line_center = np.median(line_pcd.points, axis=0)
 
-        center_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.05)
-        center_sphere.translate(line_center)
+        # center_sphere = o3d.geometry.TriangleMesh.create_sphere(radius=0.05)
+        # center_sphere.translate(line_center)
 
-        line_center = self.transform_point(line_center, self.camera_frame, "map")
-        line_center.point.x
+        # line_center = self.transform_point(line_center, self.camera_frame, "map")
+        # line_center.point.x
 
-        pose_wrist = PoseStamped()
-        pose_wrist.header.stamp = self.get_clock().now().to_msg()
-        pose_wrist.header.frame_id = "map"
-        pose_wrist.pose.position.x = line_center.point.x
-        pose_wrist.pose.position.y = line_center.point.y - 0.18
-        pose_wrist.pose.position.z = line_center.point.z - 0.025
+        # pose_wrist = PoseStamped()
+        # pose_wrist.header.stamp = self.get_clock().now().to_msg()
+        # pose_wrist.header.frame_id = "map"
+        # pose_wrist.pose.position.x = line_center.point.x
+        # pose_wrist.pose.position.y = line_center.point.y - 0.18
+        # pose_wrist.pose.position.z = line_center.point.z - 0.025
         
-        tgt_quat = [0.519, 0.508, 0.491, -0.482]
-        pose_wrist.pose.orientation.x = tgt_quat[0]
-        pose_wrist.pose.orientation.y = tgt_quat[1]
-        pose_wrist.pose.orientation.z = tgt_quat[2]
-        pose_wrist.pose.orientation.w = tgt_quat[3]
+        # tgt_quat = [0.519, 0.508, 0.491, -0.482]
+        # pose_wrist.pose.orientation.x = tgt_quat[0]
+        # pose_wrist.pose.orientation.y = tgt_quat[1]
+        # pose_wrist.pose.orientation.z = tgt_quat[2]
+        # pose_wrist.pose.orientation.w = tgt_quat[3]
         
-        cv2.putText(img,f'{pose_wrist.header.stamp.sec}', [0,30], font, 1,(255,192,203),2,cv2.LINE_AA)
+        # cv2.putText(img,f'{pose_wrist.header.stamp.sec}', [0,30], font, 1,(255,192,203),2,cv2.LINE_AA)
 
         ##### Publish
-        self.publish_img(self.img_pub, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+        self.publish_img(self.img_pub, cv2.cvtColor(img_crop, cv2.COLOR_RGB2BGR))
         # self.publish_img(self.crop_img_pub, img_crop)
-        self.ppub.publish(line_center)
-        self.posepub.publish(pose_wrist)
-        self.pcdpub.publish(convertCloudFromOpen3dToRos(line_pcd, frame_id=self.camera_frame, time=self.get_clock().now().to_msg()))
+        # self.ppub.publish(line_center)
+        # self.posepub.publish(pose_wrist)
+        # self.pcdpub.publish(convertCloudFromOpen3dToRos(line_pcd, frame_id=self.camera_frame, time=self.get_clock().now().to_msg()))
 
         self.processing = False
         

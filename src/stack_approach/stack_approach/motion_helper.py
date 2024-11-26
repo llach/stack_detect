@@ -13,6 +13,7 @@ from geometry_msgs.msg import Pose, Point, Quaternion
 from scipy.spatial.transform import Rotation as R
 
 from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallbackGroup
+from controller_manager_msgs.srv import SwitchController, ListControllers
 
 from std_msgs.msg import Header
 from moveit_msgs.srv import GetPositionIK
@@ -42,6 +43,17 @@ class MotionHelper:
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self.n)
+
+        # Set up service clients
+        self.switch_controller_client = self.n.create_client(SwitchController, '/controller_manager/switch_controller')
+        self.list_controllers_client = self.n.create_client(ListControllers, '/controller_manager/list_controllers')
+        
+        # Wait for the services to be available
+        self.switch_controller_client.wait_for_service()
+        self.list_controllers_client.wait_for_service()
+        
+        # Call to switch controller if needed
+        self.check_and_switch_controller()
 
         self.traj_client = ActionClient(
             self.n, 
@@ -74,6 +86,40 @@ class MotionHelper:
         self.log.info("found IK server!")
 
         self.log.info("MH setup done")
+
+    def check_and_switch_controller(self):
+        # Check active controllers
+        list_controllers_request = ListControllers.Request()
+        future = self.list_controllers_client.call_async(list_controllers_request)
+        rclpy.spin_until_future_complete(self.n, future)
+        
+        if future.result() is not None:
+            controllers = future.result().controller
+            active_controllers = [controller.name for controller in controllers if controller.state == 'active']
+            
+            self.n.get_logger().info(f"{active_controllers}")
+            # Check if joint_trajectory_controller is active
+            if 'joint_trajectory_controller' in active_controllers or "scaled_joint_trajectory_controller" not in active_controllers:
+                self.n.get_logger().info("joint_trajectory_controller is active, switching to scaled_joint_trajectory_controller.")
+                
+                # Set up the request to switch controllers
+                switch_request = SwitchController.Request()
+                switch_request.deactivate_controllers = ['joint_trajectory_controller']
+                switch_request.activate_controllers = ['scaled_joint_trajectory_controller']
+                switch_request.strictness = SwitchController.Request.BEST_EFFORT
+
+                # Call the switch_controller service
+                switch_future = self.switch_controller_client.call_async(switch_request)
+                rclpy.spin_until_future_complete(self.n, switch_future)
+                
+                if switch_future.result() is not None:
+                    self.n.get_logger().info("Successfully switched to scaled_joint_trajectory_controller.")
+                else:
+                    self.n.get_logger().error("Failed to switch controllers.")
+            else:
+                self.n.get_logger().info("joint_trajectory_controller is not active, no switch needed.")
+        else:
+            self.n.get_logger().error("Failed to list controllers.")
 
     def moveit_IK(self, pose, state=None, ik_link="wrist_3_link", ntries=50):
         if state is None: state = self.current_q.copy()
