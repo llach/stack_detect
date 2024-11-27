@@ -77,18 +77,7 @@ class SAMGraspPointExtractor(Node):
         masks = self.sam.predict(img_raw)
         self.get_logger().info(f"SAM took {round(time.time()-sam_start,2)}s")
 
-        import pickle
-        with open(f"{os.environ['HOME']}/stack.pkl", "wb") as f:
-            print(type(img_raw), type(boxes_px), type(masks))
-            pickle.dump([np.array(img_raw), np.array(boxes_px), masks], f)
-
-
-        msk_w = 0.4
-        img_anns = draw_anns(masks)
-        img_overlay = np.clip((1-msk_w)*img_raw + msk_w*img_anns, 0, 255).astype(np.uint8)
-        
-        x0, y0, x1, y1 = boxes_px[0]
-        cv2.rectangle(img_overlay, (x0, y0), (x1, y1), (255, 0, 255), 2)
+        img_overlay, line_pixels, line_center = SAM2Model.detect_stack(img_raw, masks, boxes_px[0])
         
         self.publish_img(self.img_pub, img_overlay)
 
