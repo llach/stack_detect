@@ -1,6 +1,40 @@
+import cv2
 import rclpy
-from geometry_msgs.msg import PoseStamped, TransformStamped
-import rclpy.clock
+import numpy as np
+
+from cv_bridge import CvBridge
+
+from std_msgs.msg import Header
+from geometry_msgs.msg import PoseStamped, TransformStamped, PointStamped
+
+bridge = CvBridge()
+def publish_img(pub, img, frame="camera_color_optical_frame"):
+    msg = bridge.cv2_to_compressed_imgmsg(cv2.cvtColor(np.array(img), cv2.COLOR_BGR2RGB), "jpeg")
+    msg.header = Header(
+        frame_id=frame,
+        stamp=rclpy.clock.Clock().now().to_msg()
+    )
+    pub.publish(msg)
+
+def pixel_to_point(pixel, depth, K, frame="camera_color_optical_frame"):
+    px, py = pixel
+    fx, fy = K[0, 0], K[1, 1]
+    cx, cy = K[0, 2], K[1, 2]
+    x = (px- cx) * depth / fx
+    y = (py - cy) * depth / fy
+    z = depth
+
+    ps = PointStamped()
+    ps.header = Header(
+        frame_id=frame,
+        stamp=rclpy.clock.Clock().now().to_msg()
+    )
+
+    ps.point.x = x
+    ps.point.y = y
+    ps.point.z = z
+    
+    return ps
 
 def call_cli_sync(node, cli, req):
     fut = cli.call_async(req)

@@ -1,11 +1,9 @@
-import os
 import cv2
 import time
 import rclpy
 import numpy as np
 
-from ctypes import * 
-from PIL import Image, ImageDraw
+from PIL import Image
 from threading import Lock
 from cv_bridge import CvBridge
 from rclpy.node import Node
@@ -15,7 +13,8 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from std_msgs.msg import Header
 from sensor_msgs.msg import Image as ImageMSG, CompressedImage
 
-from stack_detect.helpers.sam2_model import SAM2Model, draw_anns
+from stack_approach.helpers import publish_img
+from stack_detect.helpers.sam2_model import SAM2Model
 from stack_detect.helpers.dino_model import DINOModel
 
 
@@ -44,14 +43,6 @@ class SAMGraspPointExtractor(Node):
         with self.rgb_lck:
             self.rgb_msg = msg 
 
-    def publish_img(self, pub, img):
-        msg = self.bridge.cv2_to_compressed_imgmsg(cv2.cvtColor(np.array(img), cv2.COLOR_BGR2RGB), "jpeg")
-        msg.header = Header(
-            frame_id="camera_color_optical_frame",
-            stamp=self.get_clock().now().to_msg()
-        )
-        pub.publish(msg)
-        
     def extract_grasp_point(self): 
         while self.rgb_msg is None: 
             time.sleep(0.05)
@@ -79,7 +70,7 @@ class SAMGraspPointExtractor(Node):
 
         img_overlay, line_pixels, line_center = SAM2Model.detect_stack(img_raw, masks, boxes_px[0])
         
-        self.publish_img(self.img_pub, img_overlay)
+        publish_img(self.img_pub, img_overlay)
 
 
 
