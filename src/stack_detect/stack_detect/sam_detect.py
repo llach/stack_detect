@@ -1,6 +1,7 @@
 import cv2
 import time
 import rclpy
+import numpy as np
 
 from cv_bridge import CvBridge
 from threading import Lock
@@ -10,13 +11,14 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallbackGroup
 
 from std_msgs.msg import Int16MultiArray
-from sensor_msgs.msg import CompressedImage, Image as ImageMSG
+from sensor_msgs.msg import CompressedImage, CameraInfo, Image as ImageMSG
 from geometry_msgs.msg import PointStamped
 
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
+from tf2_geometry_msgs import PointStamped
 
-from stack_approach.helpers import publish_img
+from stack_approach.helpers import publish_img, pixel_to_point
 from stack_detect.helpers.sam2_model import SAM2Model
 
 class StackDetectorSAM(Node):
@@ -34,6 +36,9 @@ class StackDetectorSAM(Node):
         )
         self.img_sub = self.create_subscription(
             CompressedImage, "/camera/color/image_raw/compressed", self.rgb_cb, 0, callback_group=MutuallyExclusiveCallbackGroup()
+        )
+        self.camera_info_sub = self.create_subscription(
+            CameraInfo, '/camera/color/camera_info', self.info_cb, 0
         )
         self.box_sub = self.create_subscription(
             Int16MultiArray, '/stack_box', self.box_cb, 0, callback_group=ReentrantCallbackGroup()    
@@ -56,17 +61,8 @@ class StackDetectorSAM(Node):
         self.sam = SAM2Model()
         self.get_logger().info("setup done!")
 
-    def transform_point(self, p, frame, target):
-        gp = PointStamped()
-
-        gp.header.stamp = self.get_clock().now().to_msg()
-        gp.header.frame_id = frame
-        gp.point.x = p[0]
-        gp.point.y = p[1]
-        gp.point.z = p[2]
-
-        return self.tf_buffer.transform(gp, target, timeout=rclpy.duration.Duration(seconds=5))
-
+    def info_cb(self, msg): self.K = np.array(msg.k).reshape(3, 3)
+            
     def depth_cb(self, msg):
         with self.depth_lock:
             self.depth_msg = msg
@@ -105,9 +101,16 @@ class StackDetectorSAM(Node):
         self.get_logger().info(f"SAM took {round(time.time()-sam_start,2)}s")
 
         img_overlay, line_pixels, line_center = SAM2Model.detect_stack(img, masks, msg.data)
+        line_dist = depth_img[*line_center]/1000 # TODO maybe indices are the other way round. also factor 1000 correct?
+
+        center_point = pixel_to_point(line_center, line_dist, self.K)
+        center_point = self.tf_buffer.transform(center_point, "map", timeout=rclpy.duration.Duration(seconds=5))
+
+        print(center_point)
 
         ##### Publish
         publish_img(self.img_pub, cv2.cvtColor(img_overlay, cv2.COLOR_RGB2BGR))
+        self.ppub.publish(center_point)
 
         self.processing = False
         return
