@@ -23,6 +23,7 @@ setup(
             'towel = stack_detect.towel_detector:main',
             'sam = stack_detect.sam_detect:main',
             'dino = stack_detect.dino_detect:main',
+            'sam_gpe = stack_detect.sam_gpe:main',
         ],
     },
 )

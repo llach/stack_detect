@@ -19,64 +19,6 @@ from stack_msgs.srv import CloudPose, CloudPoseVary, StoreData, MoveArm, Gripper
 from stack_msgs.action import RecordCloud
 from stack_approach.helpers import pose_to_list, call_cli_sync, empty_pose, transform_to_pose_stamped
 
-# class CloudCollector(Node):
-#     """Subscriber node"""
-
-#     def __init__(self, executor=None):
-#         self.exe = executor
-
-#     def plan_timer(self):
-#         if self.pwrist is None:
-#             print("no desired wrist pose yet, waiting ...")
-#             return
-#         if self.current_q is None:
-#             print("no joint state yet, waiting ...")
-#             return
-    
-#         self.pl.acquire()
-#         start_q = self.current_q.copy()
-        
-#         print("approaching ...")
-#         pw = self.get_wrist_pose()
-#         pw.pose.position = self.pwrist.pose.position
-#         pw.pose.position.x += 0.01
-#         pw.pose.position.z -= 0.04
-
-#         approach_q = self.moveit_IK(start_q, self.pwrist)
-#         self.send_traj_blocking(approach_q, 3)
-
-#         print("inserting ...")
-#         pinsert = self.get_wrist_pose()
-#         pinsert.pose.position.z = 0.04
-
-#         insert_q = self.moveit_IK(approach_q, pinsert)
-#         self.send_traj_blocking(insert_q, 1)
-
-#         print("closing gripper")
-#         self.gripper.move_and_wait_for_pos(245, 0, 200)
-#         time.sleep(0.5)
-
-#         print("lifting")
-#         plift = self.get_wrist_pose()
-#         plift.pose.position.x = 0.04
-
-#         lift_q = self.moveit_IK(insert_q, plift)
-#         self.send_traj_blocking(lift_q, 1)
-
-#         print("retreating")
-#         pretr = self.get_wrist_pose()
-#         pretr.pose.position.z = -0.1
-
-#         retr_q = self.moveit_IK(lift_q, pretr)
-#         self.send_traj_blocking(retr_q, 1.5)
-
-#         print("moving back to initial pose")
-#         self.send_traj_blocking(start_q, 1.5)
-
-#         print("all done!")
-#         self.destroy_node()
-#         self.exe.shutdown()
-
 
 class DataCollectionActionClient(Node):
     def __init__(self, store_dir = f"{os.environ['HOME']}/repos/unstack_cloud"):
