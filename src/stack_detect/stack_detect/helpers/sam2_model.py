@@ -180,13 +180,17 @@ class SAM2Model:
         masks_inside, masks_outside = find_masks_in_box(sorted_masks, box)
 
         ### select the first cluster, get line pixels and a mask for drawing
-        upper_layer_mask = masks_inside[0]
-        line_mask, line_pixels = get_border_pixels(upper_layer_mask["segmentation"], left_is_up=True)
-        line_center = np.mean(line_pixels, axis=0).astype(np.uint64)
+        if len(masks_inside) > 0:
+            upper_layer_mask = masks_inside[0]
+            line_mask, line_pixels = get_border_pixels(upper_layer_mask["segmentation"], left_is_up=True)
+            line_center = np.mean(line_pixels, axis=0).astype(np.uint64)
 
-        # draw line and grasp center
-        img_overlay[line_mask] = [255,0,255]
-        cv2.circle(img_overlay, line_center, 3, (100,100,100), -1)
+            # draw line and grasp center
+            img_overlay[line_mask] = [255,0,255]
+            cv2.circle(img_overlay, line_center, 3, (100,100,100), -1)
+        else:
+            line_pixels = []
+            line_center = [0,0]
 
         # draw mask centers, the ones inside are also annotated by their index from sorting
         centers_inside = calculate_mask_centers(masks_inside)

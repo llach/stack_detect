@@ -106,8 +106,6 @@ class StackDetectorSAM(Node):
         center_point = pixel_to_point(line_center, line_dist, self.K)
         center_point = self.tf_buffer.transform(center_point, "map", timeout=rclpy.duration.Duration(seconds=5))
 
-        print(center_point)
-
         ##### Publish
         publish_img(self.img_pub, cv2.cvtColor(img_overlay, cv2.COLOR_RGB2BGR))
         self.ppub.publish(center_point)
