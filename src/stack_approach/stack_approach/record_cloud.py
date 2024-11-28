@@ -195,6 +195,7 @@ class DataCollectionActionClient(Node):
         mr = MoveArm.Request()
         mr.execute = True
         mr.target_pose = plift
+        mr.execution_time = 0.5
         lift_pose_res = call_cli_sync(self, self.move_cli, mr)
         print(lift_pose_res)
 
@@ -205,6 +206,7 @@ class DataCollectionActionClient(Node):
         mr = MoveArm.Request()
         mr.execute = True
         mr.target_pose = pretr
+        mr.execution_time = 1.5
         retr_pose_res = call_cli_sync(self, self.move_cli, mr)
         print(retr_pose_res)
 
@@ -213,6 +215,7 @@ class DataCollectionActionClient(Node):
         mr.execute = True
         mr.name_target = approach_pose_res.name_start
         mr.q_target = approach_pose_res.q_start
+        mr.execution_time = 2.0
         call_cli_sync(self, self.move_cli, mr)
 
         print("all done!")

@@ -1,6 +1,6 @@
 bool execute False
 string ik_link "wrist_3_link"
-uint8 execution_time 3
+float32 execution_time 3.0
 geometry_msgs/PoseStamped target_pose
 float32[] q_target
 string[] name_target
