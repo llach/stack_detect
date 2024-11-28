@@ -26,6 +26,9 @@ class StackDetectorDINO(Node):
 
         self.bridge = CvBridge()
         self.cb_group = ReentrantCallbackGroup()
+
+        self.declare_parameter('cpu_only', True)
+        self.cpu_only = self.get_parameter("cpu_only").get_parameter_value().bool_value
    
         self.img_sub = self.create_subscription(
             CompressedImage, "/camera/color/image_raw/compressed", self.rgb_cb, 0, callback_group=MutuallyExclusiveCallbackGroup()
@@ -36,7 +39,6 @@ class StackDetectorDINO(Node):
 
         ### DINO setup
         self.get_logger().info("setting up DINO ...")
-        self.cpu_only = True
         self.dino = DINOModel(self.cpu_only)
         self.get_logger().info("setup done!")
 
