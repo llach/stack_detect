@@ -41,6 +41,7 @@ from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSReliabilityPolic
 from rclpy.qos import QoSProfile
 
 from stack_msgs.srv import CloudPose
+from stack_approach.helpers import grasp_pose_to_wrist
 
 VIEW_PARAMS = { 
     "front" : [ 0.12346865912958778, -0.20876634334886676, 0.97014024970489954 ],
@@ -478,7 +479,7 @@ class StackDetector3D(Node):
 
         try:
             with self.gp_lock:
-               pose_wrist = self.grasp_pose_to_wrist(gp)
+               pose_wrist = grasp_pose_to_wrist(self.tf_buffer, gp)
 
             self.posepub.publish(pose_wrist)
 
@@ -489,20 +490,6 @@ class StackDetector3D(Node):
         
         # self.pcdpub.publish(convertCloudFromOpen3dToRos(pcd, frame_id=msg.header.frame_id))
         self.get_logger().debug(f"processing took {time.time()-start:2f}s", )
-
-    def grasp_pose_to_wrist(self, gp):
-        p_wrist = self.tf_buffer.transform(gp, "wrist_3_link")#, timeout=rclpy.duration.Duration(seconds=10))
-
-        pose_wrist = PoseStamped()
-        pose_wrist.header = p_wrist.header
-        if type(p_wrist) == PoseStamped:
-            pose_wrist.pose.position = p_wrist.pose.position
-        else:
-            pose_wrist.pose.position = p_wrist.point
-        pose_wrist.pose.position.x += 0.005
-        pose_wrist.pose.position.z -= 0.20
-        
-        return pose_wrist
 
     def pose_srv(self, req, res):
         gp = PoseStamped()
@@ -522,7 +509,7 @@ class StackDetector3D(Node):
         elif WIDTH_AXS == 2:
             gp.pose.position.z += offset
 
-        p_wrist = self.grasp_pose_to_wrist(gp)
+        p_wrist = grasp_pose_to_wrist(self.tf_buffer, gp)
 
         res.offset = offset
         gp.header.stamp = rclpy.time.Time().to_msg()
