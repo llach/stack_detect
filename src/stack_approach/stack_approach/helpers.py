@@ -84,7 +84,7 @@ def empty_pose(frame = ""):
     p.pose.orientation.w = 1.0
     return p
 
-def grasp_pose_to_wrist(tf_buffer, gp):
+def grasp_pose_to_wrist(tf_buffer, gp, x_off=0.005, z_off=-0.20):
     p_wrist = tf_buffer.transform(gp, "wrist_3_link")
 
     pose_wrist = PoseStamped()
@@ -93,7 +93,7 @@ def grasp_pose_to_wrist(tf_buffer, gp):
         pose_wrist.pose.position = p_wrist.pose.position
     else:
         pose_wrist.pose.position = p_wrist.point
-    pose_wrist.pose.position.x += 0.005
-    pose_wrist.pose.position.z -= 0.20
+    pose_wrist.pose.position.x += x_off
+    pose_wrist.pose.position.z += z_off
     
     return pose_wrist

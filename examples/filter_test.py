@@ -13,7 +13,7 @@ from stack_detect.helpers.sam2_model import (
     filter_masks_by_size
 )
 
-with open(f"{os.environ['HOME']}/repos/bags/stack_wide_1.pkl", "rb") as f:
+with open(f"{os.environ['HOME']}/repos/bags/line_broken.pkl", "rb") as f:
     data = pickle.load(f)
 img_raw, boxes_px, masks = data
 

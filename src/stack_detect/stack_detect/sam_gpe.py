@@ -1,6 +1,8 @@
+import os
 import cv2
 import time
 import rclpy
+import pickle
 import numpy as np
 
 from PIL import Image
@@ -77,10 +79,22 @@ class SAMGraspPointExtractor(Node):
             self.img_msg = msg
 
     def extract_grasp_point(self): 
+        ##### wait for data and tfs
+        self.get_logger().info("waiting for data ...")
         while self.img_msg is None or self.depth_msg is None or self.K is None: 
             time.sleep(0.05)
             rclpy.spin_once(self)
 
+        self.get_logger().info("waiting for transforms ...")
+        while not (
+            self.tf_buffer.can_transform("map", "wrist_3_link", rclpy.time.Time()) and
+            self.tf_buffer.can_transform("map", "camera_color_optical_frame", rclpy.time.Time())
+        ):
+            time.sleep(0.05)
+            rclpy.spin_once(self)
+        
+        self.get_logger().info("ready to grasp!")
+        
         ##### Convert image
         with self.img_lock:
             with self.depth_lock:
@@ -114,15 +128,25 @@ class SAMGraspPointExtractor(Node):
         # get 3D point and publish
         center_point = SAM2Model.get_center_point(line_center, depth_img, self.K)
         self.grasp_point_pub.publish(center_point)
+        
+        should_save = input("save? [y/N]")
+        if should_save.strip().lower() == "y":
+            file_name = input("name: ")
+            os.makedirs(f"{os.environ['HOME']}/repos/bags/", exist_ok=True)
+            with open(f"{os.environ['HOME']}/repos/bags/{file_name}.pkl", "wb") as f:
+                pickle.dump([img_raw, boxes_px, masks], f)
 
-        should_save = input("grasp? [Y/n]")
-
-        if should_save.strip().lower() == "n":
+        should_grasp = input("grasp? [Y/n]")
+        if should_grasp.strip().lower() == "n":
             print("not grasping. bye.")
             return
         
-        grasp_pose_wrist = grasp_pose_to_wrist(self.tf_buffer, center_point)
-        direct_approach_grasp(self, self.move_cli, self.gripper_cli, grasp_pose_wrist)
+        """
+        offsets: 
+            wide - x_off=0.017
+        """
+        grasp_pose_wrist = grasp_pose_to_wrist(self.tf_buffer, center_point, x_off=0.017)
+        direct_approach_grasp(self, self.move_cli, self.gripper_cli, grasp_pose_wrist, with_grasp=True)
 
         self.get_logger().info("all done!")
 

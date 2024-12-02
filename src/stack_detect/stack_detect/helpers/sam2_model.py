@@ -211,17 +211,23 @@ def filter_masks_by_size(mask_dicts, box, min_width=0.7, max_height=0.6, rotated
 
 class SAM2Model:
 
-    def __init__(self):
+    def __init__(self, 
+        points_per_side = 24, 
+        points_per_batch = 44, 
+        pred_iou_thresh = 0.7,
+        stability_score_thresh=0.9,
+        stability_score_offset=0.7
+    ):
         checkpoint = f"{os.environ['HOME']}/repos/ckp/sam2.1_hiera_large.pt"
         model_cfg = "configs/sam2.1/sam2.1_hiera_l.yaml"
 
         self.mask_generator = SAM2AutomaticMaskGenerator(
             model=build_sam2(model_cfg, checkpoint),
-            points_per_side=24,
-            points_per_batch=44,
-            pred_iou_thresh=0.7,
-            stability_score_thresh=0.9,
-            stability_score_offset=0.7,
+            points_per_side=points_per_side,
+            points_per_batch=points_per_batch,
+            pred_iou_thresh=pred_iou_thresh,
+            stability_score_thresh=stability_score_thresh,
+            stability_score_offset=stability_score_offset,
             # crop_n_layers=2,
             # box_nms_thresh=0.7,
             crop_n_points_downscale_factor=4,
@@ -246,7 +252,7 @@ class SAM2Model:
         sorted_masks = sort_masks_by_horizontal_position(masks, left_is_up=True)
 
         ### find masks where EVERY pixel falls inside the DINO box, and all also those outside
-        masks_inside, masks_outside = find_masks_in_box(sorted_masks, box)
+        masks_inside, masks_outside = find_masks_in_box(sorted_masks, box, thresh=.9)
 
         ### we discard masks that are not wide enough (small features in the background) and too tall (sometimes the stack itself is detected as a whole)
         masks_inside_ok, masks_inside_not_ok = filter_masks_by_size(masks_inside, box, rotated=True)
@@ -258,7 +264,7 @@ class SAM2Model:
             line_center = np.mean(line_pixels, axis=0).astype(np.uint64)
 
             # draw line and grasp center
-            img_overlay[line_mask] = [255,0,255]
+            img_overlay[line_mask] = [0,255,0]
             cv2.circle(img_overlay, line_center, 3, (100,100,100), -1)
         else:
             line_pixels = []
@@ -278,7 +284,7 @@ class SAM2Model:
         for c in centers_outside:
             cv2.circle(img_overlay, c, 2, (255,255,255), -1)
 
-        cv2.putText(img_overlay, datetime.now().strftime('%H:%M:%S.%f')[:-3], (5, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
+        cv2.putText(img_overlay, datetime.now().strftime('%H:%M:%S.%f')[:-3], (5, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
         return img_overlay, line_pixels, line_center
     

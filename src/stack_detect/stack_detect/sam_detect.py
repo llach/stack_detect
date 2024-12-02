@@ -58,7 +58,13 @@ class StackDetectorSAM(Node):
 
         ### SAM setup
         self.get_logger().info("loading model")
-        self.sam = SAM2Model()
+        self.sam = SAM2Model(
+            # points_per_side=32, 
+            # points_per_batch=64,
+            # pred_iou_thresh = 0.5,
+            # stability_score_thresh=0.5,
+            # stability_score_offset=0.7
+        )
         self.get_logger().info("setup done!")
 
     def info_cb(self, msg): self.K = np.array(msg.k).reshape(3, 3)
