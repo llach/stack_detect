@@ -260,7 +260,7 @@ class SAM2Model:
             cv2.circle(img_overlay, line_center, 3, (100,100,100), -1)
         else:
             line_pixels = []
-            line_center = [0,0]
+            line_center = None
 
         # draw mask centers, the ones inside are also annotated by their index from sorting
         centers_inside = calculate_mask_centers(masks_inside_ok)

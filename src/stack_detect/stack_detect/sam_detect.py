@@ -101,6 +101,11 @@ class StackDetectorSAM(Node):
         self.get_logger().info(f"SAM took {round(time.time()-sam_start,2)}s")
 
         img_overlay, line_pixels, line_center = SAM2Model.detect_stack(img, masks, msg.data)
+        if line_center is None:
+            self.get_logger().warn("Layer not found!")
+            self.processing = False
+            return
+
         line_dist = depth_img[line_center[0], line_center[1]]/1000 # TODO maybe indices are the other way round. also factor 1000 correct?
 
         center_point = pixel_to_point(line_center, line_dist, self.K)
