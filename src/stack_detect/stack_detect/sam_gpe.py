@@ -64,7 +64,7 @@ class SAMGraspPointExtractor(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
         
         self.img_pub = self.create_publisher(CompressedImage, '/camera/color/sam/compressed', 0, callback_group=self.cbg)
-        self.grasp_point_pub = self.create_publisher(PointStamped, '/grasp_point', 10, callback_group=self.cb_group)
+        self.grasp_point_pub = self.create_publisher(PointStamped, '/grasp_point', 10, callback_group=self.cbg)
 
     def info_cb(self, msg): self.K = np.array(msg.k).reshape(3, 3)
             
