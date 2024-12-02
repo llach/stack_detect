@@ -18,25 +18,25 @@ with open(f"{os.environ['HOME']}/repos/bags/stack_wide_1.pkl", "rb") as f:
 img_raw, boxes_px, masks = data
 
 
-### sort masks based on horizontal center position
-sorted_masks = sort_masks_by_horizontal_position(masks, left_is_up=True)
+# sort masks based on horizontal center position
+# sorted_masks = sort_masks_by_horizontal_position(masks, left_is_up=True)
 
-### find masks where EVERY pixel falls inside the DINO box, and all also those outside
-masks_inside, masks_outside = find_masks_in_box(sorted_masks, boxes_px[0])
+# ### find masks where EVERY pixel falls inside the DINO box, and all also those outside
+# masks_inside, masks_outside = find_masks_in_box(sorted_masks, boxes_px[0])
 
-### we discard masks that are not wide enough (small features in the background) and too tall (sometimes the stack itself is detected as a whole)
-masks_inside_ok, masks_inside_not_ok = filter_masks_by_size(masks_inside, boxes_px[0], rotated=True)
+# ### we discard masks that are not wide enough (small features in the background) and too tall (sometimes the stack itself is detected as a whole)
+# masks_inside_ok, masks_inside_not_ok = filter_masks_by_size(masks_inside, boxes_px[0], rotated=True)
 
-mask_w = 0.6
-for i, m in enumerate(masks_inside_ok):
-    img_anns = draw_anns([m])
-    img_overlay = np.clip((1-mask_w)*img_raw + mask_w*img_anns, 0, 255).astype(np.uint8)
+# mask_w = 0.6
+# for i, m in enumerate(masks_inside_ok):
+#     img_anns = draw_anns([m])
+#     img_overlay = np.clip((1-mask_w)*img_raw + mask_w*img_anns, 0, 255).astype(np.uint8)
 
-    cv2.imshow(f"Mask {i}", cv2.cvtColor(img_overlay, cv2.COLOR_RGB2BGR))
-    cv2.waitKey(0)
-    cv2.destroyWindow(f"Mask {i}")
+#     cv2.imshow(f"Mask {i}", cv2.cvtColor(img_overlay, cv2.COLOR_RGB2BGR))
+#     cv2.waitKey(0)
+#     cv2.destroyWindow(f"Mask {i}")
 
-# img_overlay, line_pixels, line_center = SAM2Model.detect_stack(img_raw, masks, boxes_px[0])
+img_overlay, line_pixels, line_center = SAM2Model.detect_stack(img_raw, masks, boxes_px[0])
 
-# cv2.imshow("Line Center", cv2.cvtColor(img_overlay, cv2.COLOR_RGB2BGR))
-# cv2.waitKey(0)
+cv2.imshow("Line Center", cv2.cvtColor(img_overlay, cv2.COLOR_RGB2BGR))
+cv2.waitKey(0)

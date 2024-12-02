@@ -2,6 +2,7 @@ import os
 import cv2
 import numpy as np
 
+from datetime import datetime
 from sam2.build_sam import build_sam2
 from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
 
@@ -276,6 +277,8 @@ class SAM2Model:
         centers_outside = calculate_mask_centers(masks_outside)
         for c in centers_outside:
             cv2.circle(img_overlay, c, 2, (255,255,255), -1)
+
+        cv2.putText(img_overlay, datetime.now().strftime('%H:%M:%S.%f')[:-3], (5, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
 
         return img_overlay, line_pixels, line_center
     
