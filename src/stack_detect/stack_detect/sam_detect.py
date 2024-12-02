@@ -100,17 +100,16 @@ class StackDetectorSAM(Node):
         masks = self.sam.predict(img)
         self.get_logger().info(f"SAM took {round(time.time()-sam_start,2)}s")
 
-        img_overlay, line_pixels, line_center = SAM2Model.detect_stack(img, masks, msg.data)
+        img_overlay, _, line_center = SAM2Model.detect_stack(img, masks, msg.data)
+        publish_img(self.img_pub, cv2.cvtColor(img_overlay, cv2.COLOR_RGB2BGR))
+
         if line_center is None:
             self.get_logger().warn("Layer not found!")
             self.processing = False
             return
 
-        # get 3D point
+        # get 3D point and publish
         center_point = SAM2Model.get_center_point(line_center, depth_img, self.K)
-    
-        ##### Publish
-        publish_img(self.img_pub, cv2.cvtColor(img_overlay, cv2.COLOR_RGB2BGR))
         self.ppub.publish(center_point)
 
         self.processing = False
