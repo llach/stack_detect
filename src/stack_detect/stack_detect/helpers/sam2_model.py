@@ -45,7 +45,7 @@ def draw_anns(anns, borders=True):
     img = np.ones((sorted_anns[0]['segmentation'].shape[0], sorted_anns[0]['segmentation'].shape[1], 3))
     for ann in sorted_anns:
         m = ann['segmentation']
-        color_mask = np.random.random(3)*[0,255,255] # less red so if we draw over masks, we have higher contrast
+        color_mask = np.random.random(3)*[255,0,255] # less red so if we draw over masks, we have higher contrast
         img[m] = color_mask
         if borders:
             import cv2
@@ -56,19 +56,23 @@ def draw_anns(anns, borders=True):
 
     return img.astype(np.uint8)
 
-def find_masks_in_box(mask_dicts, box):
+def find_masks_in_box(mask_dicts, box, thresh=0.95):
     """
-    Find masks that are fully contained within a bounding box and masks that are not.
+    Find masks that are fully contained within a bounding box, partially contained,
+    and masks that are not.
 
     Args:
         mask_dicts (list of dict): List of dictionaries, each with a key "segmentation"
                                    containing a 2D boolean array representing the mask.
         box (tuple): Bounding box in pixel space (x0, y0, x1, y1).
+        thresh (float): Minimum fraction of mask pixels that must be inside the box
+                        for it to be considered contained. Defaults to 0.95.
 
     Returns:
         tuple: (contained_masks, not_contained_masks)
-               - contained_masks: List of dicts for masks fully contained in the box.
-               - not_contained_masks: List of dicts for masks not fully contained in the box.
+               - contained_masks: List of dicts for masks contained in the box
+                 based on the threshold.
+               - not_contained_masks: List of dicts for masks not meeting the threshold.
     """
     x0, y0, x1, y1 = box
     contained_masks = []
@@ -81,9 +85,21 @@ def find_masks_in_box(mask_dicts, box):
         
         # Find coordinates of all True pixels in the mask
         rows, cols = np.where(segmentation)
-        
-        # Check if all True pixels fall within the box
-        if np.all((x0 <= cols) & (cols <= x1) & (y0 <= rows) & (rows <= y1)):
+        total_pixels = len(rows)  # Total number of True pixels in the mask
+
+        if total_pixels == 0:  # Skip empty masks
+            not_contained_masks.append(mask_dict)
+            continue
+
+        # Check how many True pixels fall within the box
+        in_box = (x0 <= cols) & (cols <= x1) & (y0 <= rows) & (rows <= y1)
+        pixels_in_box = np.sum(in_box)
+
+        # Calculate the fraction of pixels inside the box
+        fraction_in_box = pixels_in_box / total_pixels
+
+        # Classify based on threshold
+        if fraction_in_box >= thresh:
             contained_masks.append(mask_dict)
         else:
             not_contained_masks.append(mask_dict)
@@ -140,6 +156,57 @@ def get_border_pixels(mask, left_is_up):
 
     return border, np.array(border_pixels, dtype=np.uint64)
 
+def filter_masks_by_size(mask_dicts, box, min_width=0.7, max_height=0.6, rotated=False):
+    """
+    Filter masks based on their width and height as fractions of the bounding box size.
+
+    Args:
+        mask_dicts (list of dict): List of dictionaries, each with a key "segmentation"
+                                   containing a 2D boolean array representing the mask.
+        box (tuple): Bounding box in pixel space (x0, y0, x1, y1).
+        min_width (float): Minimum width fraction (default: 0.7).
+        max_height (float): Maximum height fraction (default: 0.6).
+        rotated (bool): If True, the width dimension is treated as the image's y axis,
+                        otherwise as the image's x axis.
+
+    Returns:
+        tuple: (masks_meeting_criteria, masks_not_meeting_criteria)
+               - masks_meeting_criteria: List of dicts for masks meeting the criteria.
+               - masks_not_meeting_criteria: List of dicts for masks not meeting the criteria.
+    """
+    x0, y0, x1, y1 = box
+    box_width = y1 - y0 if rotated else x1 - x0
+    box_height = x1 - x0 if rotated else y1 - y0
+
+    masks_meeting_criteria = []
+    masks_not_meeting_criteria = []
+
+    for mask_dict in mask_dicts:
+        segmentation = mask_dict["segmentation"]
+        if not isinstance(segmentation, np.ndarray) or segmentation.dtype != bool:
+            raise ValueError("The 'segmentation' key must contain a 2D boolean numpy array.")
+        
+        # Find the bounding box of the mask
+        rows, cols = np.where(segmentation)
+        if len(rows) == 0 or len(cols) == 0:  # Empty mask
+            masks_not_meeting_criteria.append(mask_dict)
+            continue
+
+        mask_width = (rows.max() - rows.min() + 1) if rotated else (cols.max() - cols.min() + 1)
+        mask_height = (cols.max() - cols.min() + 1) if rotated else (rows.max() - rows.min() + 1)
+
+        # Normalize by box dimensions
+        normalized_width = mask_width / box_width
+        normalized_height = mask_height / box_height
+
+        # Check if mask meets the criteria
+        if normalized_width >= min_width and normalized_height <= max_height:
+            masks_meeting_criteria.append(mask_dict)
+        else:
+            masks_not_meeting_criteria.append(mask_dict)
+
+    return masks_meeting_criteria, masks_not_meeting_criteria
+
 class SAM2Model:
 
     def __init__(self):
@@ -179,9 +246,12 @@ class SAM2Model:
         ### find masks where EVERY pixel falls inside the DINO box, and all also those outside
         masks_inside, masks_outside = find_masks_in_box(sorted_masks, box)
 
+        ### we discard masks that are not wide enough (small features in the background) and too tall (sometimes the stack itself is detected as a whole)
+        masks_inside_ok, masks_inside_not_ok = filter_masks_by_size(masks_inside, box, rotated=True)
+
         ### select the first cluster, get line pixels and a mask for drawing
-        if len(masks_inside) > 0:
-            upper_layer_mask = masks_inside[0]
+        if len(masks_inside_ok) > 0:
+            upper_layer_mask = masks_inside_ok[0]
             line_mask, line_pixels = get_border_pixels(upper_layer_mask["segmentation"], left_is_up=True)
             line_center = np.mean(line_pixels, axis=0).astype(np.uint64)
 
@@ -193,9 +263,13 @@ class SAM2Model:
             line_center = [0,0]
 
         # draw mask centers, the ones inside are also annotated by their index from sorting
-        centers_inside = calculate_mask_centers(masks_inside)
+        centers_inside = calculate_mask_centers(masks_inside_ok)
         for i, c in enumerate(centers_inside):
             cv2.putText(img_overlay,f'{i}', c, cv2.FONT_HERSHEY_SIMPLEX, .5,(0,0,0),2,cv2.LINE_AA)
+            cv2.circle(img_overlay, c, 2, (0,255,0), -1)
+
+        centers_inside_not_ok = calculate_mask_centers(masks_inside_not_ok)
+        for c in centers_inside_not_ok:
             cv2.circle(img_overlay, c, 2, (255,0,0), -1)
 
         centers_outside = calculate_mask_centers(masks_outside)
