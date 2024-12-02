@@ -143,20 +143,39 @@ def sort_masks_by_horizontal_position(mask_dicts, left_is_up):
     return [mask for mask, _ in sorted_masks]
 
 def get_border_pixels(mask, left_is_up):
+    """
+    Extracts the border pixels of a binary mask. Only one pixel per row is selected, 
+    either the leftmost or rightmost pixel based on the `left_is_up` parameter.
+
+    Args:
+        mask (np.ndarray): A 2D binary boolean mask.
+        left_is_up (bool): If True, return the leftmost pixel per row. 
+                           If False, return the rightmost pixel per row.
+
+    Returns:
+        tuple: (binary_mask, pixel_array)
+               - binary_mask (np.ndarray): A 2D binary mask with border pixels set to True.
+               - pixel_array (np.ndarray): Array of border pixel positions as [[x1, y1], [x2, y2], ...].
+    """
     if not isinstance(mask, np.ndarray) or mask.dtype != bool:
         raise ValueError("The mask must be a 2D boolean numpy array.")
     
-    # Find the border pixels
-    border = np.zeros_like(mask, dtype=bool)
-    if left_is_up:
-        border[:, :-1] |= mask[:, :-1] & ~mask[:, 1:]  # Left edge
-    else:
-        border[:, 1:] |= mask[:, 1:] & ~mask[:, :-1]  # Right edge
+    border_mask = np.zeros_like(mask, dtype=bool)  # Initialize an empty binary mask
+    border_pixels = []
 
-    rows, cols = np.where(border)
-    border_pixels = np.array(list(zip(cols, rows)))
+    # Iterate over each row to find the leftmost or rightmost pixel
+    for y in range(mask.shape[0]):
+        row = mask[y, :]
+        if np.any(row):  # Check if the row contains any True values
+            if not left_is_up:
+                x = np.argmax(row)  # Index of the first True value (leftmost)
+            else:
+                x = len(row) - 1 - np.argmax(row[::-1])  # Index of the last True value (rightmost)
+            border_mask[y, x] = True  # Mark the pixel in the binary mask
+            border_pixels.append([x, y])
 
-    return border, np.array(border_pixels, dtype=np.uint64)
+    return border_mask, np.array(border_pixels, dtype=np.uint64)
+
 
 def filter_masks_by_size(mask_dicts, box, min_width=0.7, max_height=0.6, rotated=False):
     """
