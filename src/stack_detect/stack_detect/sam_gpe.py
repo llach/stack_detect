@@ -77,7 +77,7 @@ class SAMGraspPointExtractor(Node):
             self.img_msg = msg
 
     def extract_grasp_point(self): 
-        while self.rgb_msg is None or self.depth_msg is None or self.K is None: 
+        while self.img_msg is None or self.depth_msg is None or self.K is None: 
             time.sleep(0.05)
             rclpy.spin_once(self)
 
