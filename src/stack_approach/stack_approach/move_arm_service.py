@@ -15,6 +15,8 @@ class MoveArmService(Node):
         self.srv = self.create_service(MoveArm, 'move_arm', self.srv_callback)
         self.mh = MotionHelper(self)
 
+        self.get_logger().info("setup done!")
+
     def srv_callback(self, request, response):
 
         if len(request.q_target) > 0:
