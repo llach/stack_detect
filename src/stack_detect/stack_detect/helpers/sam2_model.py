@@ -1,10 +1,11 @@
 import os
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
 
 from sam2.build_sam import build_sam2
 from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
+
+from stack_approach.helpers import pixel_to_point
 
 def calculate_mask_centers(mask_dicts):
     """
@@ -277,3 +278,9 @@ class SAM2Model:
             cv2.circle(img_overlay, c, 2, (255,255,255), -1)
 
         return img_overlay, line_pixels, line_center
+    
+    @staticmethod
+    def get_center_point(pixel, depth_img, K):
+        # get distance, convert to 3D point
+        line_dist = depth_img[pixel[1], pixel[0]]/1000 # convert to meters
+        return pixel_to_point(pixel, line_dist, K) # TODO reverse pixel order here too?

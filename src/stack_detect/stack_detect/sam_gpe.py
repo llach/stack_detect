@@ -26,8 +26,11 @@ class SAMGraspPointExtractor(Node):
 
         self.bridge = CvBridge()
 
+        self.declare_parameter('dino_cpu', True)
+        self.dino_cpu = self.get_parameter("dino_cpu").get_parameter_value().bool_value
+
         self.sam = SAM2Model()
-        self.dino = DINOModel(cpu_only=True)
+        self.dino = DINOModel(cpu_only=self.dino_cpu)
 
         self.rgb_msg = None
         self.rgb_lck = Lock()
@@ -69,7 +72,7 @@ class SAMGraspPointExtractor(Node):
         self.get_logger().info(f"SAM took {round(time.time()-sam_start,2)}s")
 
         img_overlay, line_pixels, line_center = SAM2Model.detect_stack(img_raw, masks, boxes_px[0])
-        
+
         publish_img(self.img_pub, img_overlay)
 
 

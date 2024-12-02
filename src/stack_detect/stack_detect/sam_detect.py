@@ -106,11 +106,9 @@ class StackDetectorSAM(Node):
             self.processing = False
             return
 
-        line_dist = depth_img[line_center[0], line_center[1]]/1000 # TODO maybe indices are the other way round. also factor 1000 correct?
-
-        center_point = pixel_to_point(line_center, line_dist, self.K)
-        center_point = self.tf_buffer.transform(center_point, "map", timeout=rclpy.duration.Duration(seconds=5))
-
+        # get 3D point
+        center_point = SAM2Model.get_center_point(line_center, depth_img, self.K)
+    
         ##### Publish
         publish_img(self.img_pub, cv2.cvtColor(img_overlay, cv2.COLOR_RGB2BGR))
         self.ppub.publish(center_point)
