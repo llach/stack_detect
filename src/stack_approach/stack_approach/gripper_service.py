@@ -26,7 +26,7 @@ class GripperServiceClient(Node):
         self.get_logger().info("setup done!")
 
     def close(self):
-        self.gripper.move_and_wait_for_pos(255, 255, 255)
+        self.gripper.move_and_wait_for_pos(230, 255, 255)
 
     def open(self):
         self.gripper.move_and_wait_for_pos(0, 0, 0)
