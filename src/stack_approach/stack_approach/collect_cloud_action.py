@@ -306,7 +306,8 @@ class DataCollectionActionServer(Node):
 
                     dframe = (np.clip(dframe, 0, 2000)/2000*255).astype(np.uint8)
                     if self.downsample: dframe = cv2.resize(dframe, self.video_dims, interpolation = cv2.INTER_AREA)
-                    df = np.zeros((224,299,3), dtype=np.uint8)
+                    
+                    df = np.zeros(dframe.shape[:2]+(3,), dtype=np.uint8)
                     df[:,:,0] = dframe
 
                     writer.writeFrame(dframe)

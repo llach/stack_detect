@@ -3,7 +3,7 @@ import rclpy
 import numpy as np
 
 from cv_bridge import CvBridge
-
+from scipy.spatial.transform import Rotation as R
 from std_msgs.msg import Header
 from geometry_msgs.msg import PoseStamped, TransformStamped, PointStamped
 
@@ -84,6 +84,13 @@ def empty_pose(frame = ""):
     p.pose.orientation.w = 1.0
     return p
 
+def point_to_pose(point):
+    pose = PoseStamped()
+    pose.header = point.header
+    pose.pose.position = point.point
+    
+    return pose
+
 def grasp_pose_to_wrist(tf_buffer, gp, x_off=0.005, z_off=-0.20):
     p_wrist = tf_buffer.transform(gp, "wrist_3_link")
 
@@ -97,3 +104,63 @@ def grasp_pose_to_wrist(tf_buffer, gp, x_off=0.005, z_off=-0.20):
     pose_wrist.pose.position.z += z_off
     
     return pose_wrist
+
+def matrix_to_pose_msg(T, frame_id):
+        ps = PoseStamped(
+            header=Header(
+                stamp=rclpy.time.Time().to_msg(),
+                frame_id=frame_id
+            )
+        )
+        t = T[:3,3]
+        q = R.from_matrix(T[:3,:3]).as_quat()
+        ps.pose.position.x = t[0]
+        ps.pose.position.y = t[1]
+        ps.pose.position.z = t[2]
+
+        ps.pose.orientation.x = q[0]
+        ps.pose.orientation.y = q[1]
+        ps.pose.orientation.z = q[2]
+        ps.pose.orientation.w = q[3]
+        
+        return ps
+
+def tf_msg_to_matrix(msg):
+        t = msg.transform.translation
+        t = [t.x, t.y, t.z]
+
+        q = msg.transform.rotation
+        q = [q.x, q.y, q.z, q.w]
+
+        T = np.eye(4)
+        T[:3,:3] = R.from_quat(q).as_matrix()
+        T[:3,3] = t
+
+        return T
+    
+def pose_to_matrix(msg):
+        t = msg.pose.position
+        t = [t.x, t.y, t.z]
+
+        q = msg.pose.orientation
+        q = [q.x, q.y, q.z, q.w]
+
+        T = np.eye(4)
+        T[:3,:3] = R.from_quat(q).as_matrix()
+        T[:3,3] = t
+
+        return T
+    
+def get_trafo(fro, to, tf_buffer):
+        return tf_msg_to_matrix(tf_buffer.lookup_transform(fro, to, rclpy.time.Time()))
+    
+def inv(T):
+    Ti = np.eye(4)
+    Ti[:3,:3] = Ti[:3,:3].T
+    Ti[:3,3] = -1*T[:3,3]
+    return Ti
+
+def finger_matrix_to_wrist_pose(Tf, buffer, frame_id="map"):
+    Twf = get_trafo("wrist_3_link", "finger", buffer)
+    Tfw = inv(Twf)
+    return matrix_to_pose_msg(Tf@Tfw, frame_id)

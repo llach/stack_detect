@@ -24,6 +24,7 @@ setup(
             'sam = stack_detect.sam_detect:main',
             'dino = stack_detect.dino_detect:main',
             'sam_gpe = stack_detect.sam_gpe:main',
+            'collect_classify = stack_detect.collect_classify:main',
         ],
     },
 )
