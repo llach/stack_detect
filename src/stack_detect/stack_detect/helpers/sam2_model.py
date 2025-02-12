@@ -271,7 +271,7 @@ class SAM2Model:
         sorted_masks = sort_masks_by_horizontal_position(masks, left_is_up=True)
 
         ### find masks where EVERY pixel falls inside the DINO box, and all also those outside
-        masks_inside, masks_outside = find_masks_in_box(sorted_masks, box, thresh=.9)
+        masks_inside, masks_outside = find_masks_in_box(sorted_masks, box, thresh=.5)
 
         ### we discard masks that are not wide enough (small features in the background) and too tall (sometimes the stack itself is detected as a whole)
         masks_inside_ok, masks_inside_not_ok = filter_masks_by_size(masks_inside, box, rotated=True)

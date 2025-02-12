@@ -188,30 +188,27 @@ class SAMGraspPointExtractor(Node):
         gh = self.start_recording()
         time.sleep(0.3)
         
-        # if sg == "d":
-        #     grasp_pose_wrist = grasp_pose_to_wrist(self.tf_buffer, center_point, x_off=0.017)
-        #     self.grasp_pose_pub.publish(grasp_pose_wrist)
+        if sg == "d":
+            grasp_pose_wrist = grasp_pose_to_wrist(self.tf_buffer, center_point, x_off=0.017)
+            self.grasp_pose_pub.publish(grasp_pose_wrist)
 
-        #     direct_approach_grasp(self, self.move_cli, self.gripper_cli, grasp_pose_wrist, with_grasp=False)
-        # elif sg == "a":
+            direct_approach_grasp(self, self.move_cli, self.gripper_cli, grasp_pose_wrist, with_grasp=True)
+        elif sg == "a":
         
-        #     Tfw = get_trafo("finger", "wrist_3_link", self.tf_buffer)
+            Tfw = get_trafo("finger", "wrist_3_link", self.tf_buffer)
             
-        #     center_pose = pose_to_matrix(self.tf_buffer.transform(point_to_pose(center_point), "wrist_3_link"))
-        #     center_pose[:3,:3] = np.eye(3) @ R.from_euler("xyz", [0, -30, 0], degrees=True).as_matrix() 
-        #     center_pose = center_pose @ Tfw
-        #     # center_pose[:3,3] += [0.0099,0,-0.015] # dark stack
-        #     center_pose[:3,3] += [0.0065,0,-0.015] # light stack
-        #     print(center_pose)
+            center_pose = pose_to_matrix(self.tf_buffer.transform(point_to_pose(center_point), "wrist_3_link"))
+            center_pose[:3,:3] = np.eye(3) @ R.from_euler("xyz", [0, -30, 0], degrees=True).as_matrix() 
+            center_pose = center_pose @ Tfw
+            # center_pose[:3,3] += [0.0099,0,-0.015] # dark stack
+            center_pose[:3,3] += [0.0065,0,-0.015] # light stack
+            print(center_pose)
     
             
-        #     center_pose_msg = matrix_to_pose_msg(center_pose, "wrist_3_link")
-        #     self.grasp_pose_pub.publish(center_pose_msg)
+            center_pose_msg = matrix_to_pose_msg(center_pose, "wrist_3_link")
+            self.grasp_pose_pub.publish(center_pose_msg)
             
-        #     angled_approach_grasp(self, self.move_cli, self.gripper_cli, center_pose_msg, self.tf_buffer, with_grasp=True)            
-        
-
-        
+            angled_approach_grasp(self, self.move_cli, self.gripper_cli, center_pose_msg, self.tf_buffer, with_grasp=True)
         
         #### Store data
         time.sleep(0.3)

@@ -82,7 +82,7 @@ def collect(node):
         img_raw = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         image_pil = Image.fromarray(img_raw, mode="RGB")
         
-        filename = f"{datetime.now().strftime('%H:%M:%S.%f_%d.%m.%Y')}.png"
+        filename = f"{datetime.now().strftime('%H.%M.%S.%f_%d.%m.%Y')}.png"
         image_pil.save(f"{outdir}/{filename}")
         
         n_imgs += 1

@@ -80,7 +80,9 @@ class DataCollectionActionServer(Node):
         self.declare_parameter('image_topic', "/camera/color/image_raw/compressed")
         self.declare_parameter('depth_topic', "/camera/aligned_depth_to_color/image_raw")
         self.declare_parameter('video_dims',  [299, 224])
+        self.declare_parameter('crf',  0)
 
+        self.crf = self.get_parameter("crf").get_parameter_value().integer_value
         self.sim = self.get_parameter("sim").get_parameter_value().bool_value
         self.downsample = self.get_parameter("downsample").get_parameter_value().bool_value
         self.video_dims = self.get_parameter("video_dims").get_parameter_value().integer_array_value

@@ -90,7 +90,10 @@ def angled_approach_grasp(node, move_cli, gripper_cli, start_wrist_pose, buffer,
     print(approach_pose_res)
     
     if with_grasp:
-        pass
+        
+        ####
+        ####        INSERT 1
+        ####
         node.get_logger().info("inserting ...")
         Tmw = get_trafo("map", "wrist_3_link", buffer)
         Tmw[:3,3] += [0,0.015,0]
@@ -103,6 +106,9 @@ def angled_approach_grasp(node, move_cli, gripper_cli, start_wrist_pose, buffer,
         insert_pose_res = call_cli_sync(node, move_cli, mr)
         print(insert_pose_res)
         
+        ####
+        ####        INSERT 2
+        ####
         Tmw = get_trafo("map", "wrist_3_link", buffer)
         Tmw[:3,3] += [0,0,0.01]
         pinsert2 = matrix_to_pose_msg(Tmw, "map")
@@ -114,6 +120,9 @@ def angled_approach_grasp(node, move_cli, gripper_cli, start_wrist_pose, buffer,
         insert_pose_res = call_cli_sync(node, move_cli, mr)
         print(insert_pose_res)
         
+        ####
+        ####        INSERT 3
+        ####
         Tmw = get_trafo("map", "wrist_3_link", buffer)
         Tmw[:3,3] += [0,0.018,0]
         pinsert3 = matrix_to_pose_msg(Tmw, "map")
@@ -125,33 +134,27 @@ def angled_approach_grasp(node, move_cli, gripper_cli, start_wrist_pose, buffer,
         insert_pose_res = call_cli_sync(node, move_cli, mr)
         print(insert_pose_res)
 
-    #     node.get_logger().info("closing gripper")
-    #     gripper_close_time = datetime.now().timestamp()
-    #     node.get_logger().info(f"{gripper_close_time}")
-    #     gr = GripperService.Request()
-    #     gr.open = False
-    #     call_cli_sync(node, gripper_cli, gr)
+        node.get_logger().info("closing gripper")
+        gripper_close_time = datetime.now().timestamp()
+        node.get_logger().info(f"{gripper_close_time}")
+        gr = GripperService.Request()
+        gr.open = False
+        call_cli_sync(node, gripper_cli, gr)
 
-    #     node.get_logger().info("lifting")
-    #     plift = empty_pose(frame="wrist_3_link")
-    #     plift.pose.position.x = 0.04
+        ####
+        ####        LIFT
+        ####
+        Tmw = get_trafo("map", "wrist_3_link", buffer)
+        Tmw[:3,3] += [0,0,0.03]
+        pinsert3 = matrix_to_pose_msg(Tmw, "map")
 
-    #     mr = MoveArm.Request()
-    #     mr.execute = True
-    #     mr.target_pose = plift
-    #     mr.execution_time = 0.5
-    #     lift_pose_res = call_cli_sync(node, move_cli, mr)
-
-    #     node.get_logger().info("retreating")
-    #     pretr = empty_pose(frame="wrist_3_link")
-    #     pretr.pose.position.z = -0.1
-
-    #     mr = MoveArm.Request()
-    #     mr.execute = True
-    #     mr.target_pose = pretr
-    #     mr.execution_time = 1.5
-    #     retr_pose_res = call_cli_sync(node, move_cli, mr)
-    #     print(retr_pose_res)
+        mr = MoveArm.Request()
+        mr.execute = True
+        mr.execution_time = 1.
+        mr.target_pose = pinsert3
+        insert_pose_res = call_cli_sync(node, move_cli, mr)
+        print(insert_pose_res)
+        
     else:
         time.sleep(5)
 
