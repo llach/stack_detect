@@ -22,8 +22,8 @@ class MoveArmService(Node):
         if len(request.q_target) > 0:
             self.get_logger().info(f"executing q_target {request.q_target} ...")
             q_target = {jname: q for jname, q in zip(request.name_target, request.q_target)}
-            self.mh.send_traj_blocking(q_target, request.execution_time)
-            time.sleep(0.5)
+            self.mh.send_traj(q_target, request.execution_time, blocking=request.blocking)
+            if request.blocking: time.sleep(0.5)
             self.get_logger().info("done")
             response.success = True
             return response
@@ -45,8 +45,8 @@ class MoveArmService(Node):
         
         if request.execute:
             self.get_logger().info("executing trajectory ...")
-            self.mh.send_traj_blocking(q_target, request.execution_time)
-            time.sleep(0.5)
+            self.mh.send_traj(q_target, request.execution_time, blocking=request.blocking)
+            if request.blocking: time.sleep(0.5)
             self.get_logger().info("done")
         else:
             self.get_logger().info("execution not requested.")

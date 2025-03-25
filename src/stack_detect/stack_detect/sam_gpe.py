@@ -24,7 +24,7 @@ from stack_msgs.action import RecordCloud
 from stack_msgs.srv import StoreData
 from stack_approach.helpers import grasp_pose_to_wrist, publish_img, point_to_pose, empty_pose, get_trafo, inv, matrix_to_pose_msg, pose_to_matrix, call_cli_sync
 from stack_detect.helpers.sam2_model import SAM2Model
-from stack_detect.helpers.dino_model import DINOModel
+from stack_detect.helpers.dino_model import DINOModel, plot_boxes_to_image
 from stack_msgs.srv import MoveArm, GripperService
 from stack_approach.grasping_primitives import direct_approach_grasp, angled_approach_grasp
 from scipy.spatial.transform import Rotation as R
@@ -159,6 +159,17 @@ class SAMGraspPointExtractor(Node):
             "detect all stacks of clothing"
         )
         self.get_logger().info(f"DINO took {round(time.time()-dino_start,2)}s")
+        
+        image_with_box = plot_boxes_to_image(image_pil.copy(), boxes_px, pred_phrases)[0]
+        publish_img(self.img_pub, cv2.cvtColor(np.array(image_with_box), cv2.COLOR_RGB2BGR))
+        
+        box_idx = input("which box? ")
+        try:
+            box_idx = int(box_idx)
+            box = boxes_px[box_idx]
+        except Exception as e:
+            print(f"box indexing error: {e}")
+            return
 
         ##### Run SAM
         sam_start = time.time()
@@ -166,7 +177,7 @@ class SAMGraspPointExtractor(Node):
         masks = self.sam.predict(img_raw)
         self.get_logger().info(f"SAM took {round(time.time()-sam_start,2)}s")
 
-        img_overlay, _, line_center = SAM2Model.detect_stack(img, masks, boxes_px[0])
+        img_overlay, _, line_center = SAM2Model.detect_stack(img, masks, box)
         publish_img(self.img_pub, cv2.cvtColor(img_overlay, cv2.COLOR_RGB2BGR))
 
         if line_center is None:
@@ -189,7 +200,8 @@ class SAMGraspPointExtractor(Node):
         time.sleep(0.3)
         
         if sg == "d":
-            grasp_pose_wrist = grasp_pose_to_wrist(self.tf_buffer, center_point, x_off=0.017)
+            # blue puffy: 0.007
+            grasp_pose_wrist = grasp_pose_to_wrist(self.tf_buffer, center_point, x_off=0.018, z_off=-0.22)
             self.grasp_pose_pub.publish(grasp_pose_wrist)
 
             direct_approach_grasp(self, self.move_cli, self.gripper_cli, grasp_pose_wrist, with_grasp=True)
@@ -200,8 +212,12 @@ class SAMGraspPointExtractor(Node):
             center_pose = pose_to_matrix(self.tf_buffer.transform(point_to_pose(center_point), "wrist_3_link"))
             center_pose[:3,:3] = np.eye(3) @ R.from_euler("xyz", [0, -30, 0], degrees=True).as_matrix() 
             center_pose = center_pose @ Tfw
+            
+            # 1st: how much above the stack? positive = up
+            # 3rd: how much into the stack? negative = further away from stack
             # center_pose[:3,3] += [0.0099,0,-0.015] # dark stack
-            center_pose[:3,3] += [0.0065,0,-0.015] # light stack
+            center_pose[:3,3] += [0.00,0,-0.03] # weird light stack
+            # center_pose[:3,3] += [0.0065,0,-0.025] # light stack
             print(center_pose)
     
             

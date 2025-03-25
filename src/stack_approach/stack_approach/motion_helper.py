@@ -149,11 +149,13 @@ class MotionHelper:
     def js_callback(self, msg):
         self.current_q = {jname: q for jname, q in zip(msg.name, msg.position)}
 
-    def send_traj_blocking(self, qfinal, t):
+    def send_traj(self, qfinal, t, blocking=True):
         print("sending goal")
-        return self.traj_client.send_goal(
-            self.create_traj(qfinal, t)
-        )
+        traj = self.create_traj(qfinal, t)
+        if blocking: 
+            return self.traj_client.send_goal(traj)
+        else:
+            return self.traj_client.send_goal_async(traj)
 
     def create_traj(self, qfinal, time):
         traj_goal = FollowJointTrajectory.Goal()

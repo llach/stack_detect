@@ -156,7 +156,7 @@ def get_trafo(fro, to, tf_buffer):
     
 def inv(T):
     Ti = np.eye(4)
-    Ti[:3,:3] = Ti[:3,:3].T
+    Ti[:3,:3] = T[:3,:3].T
     Ti[:3,3] = -1*T[:3,3]
     return Ti
 

@@ -1,4 +1,5 @@
 bool execute False
+bool blocking True
 string ik_link "wrist_3_link"
 float32 execution_time 3.0
 geometry_msgs/PoseStamped target_pose

@@ -52,7 +52,7 @@ def get_grounding_output(model, image, caption, box_threshold, text_threshold=No
     # filter output
     if token_spans is None:
         logits_filt = logits.cpu().clone()
-        boxes_filt = boxes.cpu().clone()
+        boxes_filt = boxes.cpu().clone().numpy()
         filt_mask = logits_filt.max(dim=1)[0] > box_threshold
         logits_filt = logits_filt[filt_mask]  # num_filt, 256
         boxes_filt = boxes_filt[filt_mask]  # num_filt, 4
@@ -97,7 +97,7 @@ def get_grounding_output(model, image, caption, box_threshold, text_threshold=No
                 confidences.append(logit.max().item())
             else:
                 all_phrases.extend([phrase for _ in range(len(filt_mask))])
-        boxes_filt = torch.cat(all_boxes, dim=0).cpu()
+        boxes_filt = torch.cat(all_boxes, dim=0).cpu().numpy()
         pred_phrases = all_phrases
 
     zipped = list(zip(confidences, boxes_filt, pred_phrases))
@@ -122,7 +122,7 @@ def plot_boxes_to_image(image_pil, boxes, labels):
     mask_draw = ImageDraw.Draw(mask)
 
     # draw boxes and masks
-    for box, label in zip(boxes, labels):
+    for i, (box, label) in enumerate(zip(boxes, labels)):
         x0, y0, x1, y1 = box
         color = tuple((255, 0, 255))
 
@@ -138,6 +138,12 @@ def plot_boxes_to_image(image_pil, boxes, labels):
         # bbox = draw.textbbox((x0, y0), str(label))
         draw.rectangle(bbox, fill=color)
         draw.text((x0, y0), str(label), fill="white")
+        
+        font = ImageFont.load_default(35)
+         # Calculate the center of the bounding box
+        center_x = (x0 + x1) / 2
+        center_y = (y0 + y1) / 2
+        draw.text((center_x, center_y), str(i), fill="white", font=font)
 
         mask_draw.rectangle([x0, y0, x1, y1], fill=255, width=6)
 

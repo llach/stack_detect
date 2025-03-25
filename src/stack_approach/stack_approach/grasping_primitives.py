@@ -96,7 +96,7 @@ def angled_approach_grasp(node, move_cli, gripper_cli, start_wrist_pose, buffer,
         ####
         node.get_logger().info("inserting ...")
         Tmw = get_trafo("map", "wrist_3_link", buffer)
-        Tmw[:3,3] += [0,0.015,0]
+        Tmw[:3,3] += [0,0.02,0]
         pinsert = matrix_to_pose_msg(Tmw, "map")
 
         mr = MoveArm.Request()
@@ -110,7 +110,7 @@ def angled_approach_grasp(node, move_cli, gripper_cli, start_wrist_pose, buffer,
         ####        INSERT 2
         ####
         Tmw = get_trafo("map", "wrist_3_link", buffer)
-        Tmw[:3,3] += [0,0,0.01]
+        Tmw[:3,3] += [0,0,0.005]
         pinsert2 = matrix_to_pose_msg(Tmw, "map")
 
         mr = MoveArm.Request()

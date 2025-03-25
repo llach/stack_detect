@@ -234,7 +234,7 @@ class SAM2Model:
         points_per_side = 24, 
         points_per_batch = 44, 
         pred_iou_thresh = 0.7,
-        stability_score_thresh=0.9,
+        stability_score_thresh=0.8,
         stability_score_offset=0.7
     ):
         checkpoint = f"{os.environ['HOME']}/repos/ckp/sam2.1_hiera_large.pt"
@@ -247,11 +247,11 @@ class SAM2Model:
             pred_iou_thresh=pred_iou_thresh,
             stability_score_thresh=stability_score_thresh,
             stability_score_offset=stability_score_offset,
-            # crop_n_layers=2,
-            # box_nms_thresh=0.7,
-            crop_n_points_downscale_factor=4,
-            min_mask_region_area=25.0,
-            # use_m2m=True,
+            crop_n_layers=1,
+            box_nms_thresh=0.7,
+            crop_n_points_downscale_factor=2,
+            min_mask_region_area=100.0,
+            use_m2m=True,
         )
 
     def predict(self, image):
