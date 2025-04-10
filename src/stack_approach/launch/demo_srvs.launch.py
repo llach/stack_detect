@@ -22,32 +22,32 @@ def generate_launch_description():
     sim = LaunchConfiguration("sim")
 
     nodes_to_start = []
-    # nodes_to_start.append(
-    #     Node(
-    #         package='rexp',
-    #         executable='test_srv',
-    #         name='test_srv',
-    #         output="screen",
-    #         condition=IfCondition(sim),
-    #     ),
-    # )
-    # nodes_to_start.append(
-    #     Node(
-    #         package='stack_detect',
-    #         executable='cloud_normals',
-    #         name='cloud_normals',
-    #         output="screen",
-    #         condition=UnlessCondition(sim),
-    #     ),
-    # )
-    # nodes_to_start.append(
-    #     Node(
-    #         package='stack_approach',
-    #         executable='cloud_pose_vary',
-    #         name='cloud_pose_vary',
-    #         output="screen",
-    #     ),
-    # )
+    nodes_to_start.append(
+        Node(
+            package='rexp',
+            executable='test_srv',
+            name='test_srv',
+            output="screen",
+            condition=IfCondition(sim),
+        ),
+    )
+    nodes_to_start.append(
+        Node(
+            package='stack_detect',
+            executable='cloud_normals',
+            name='cloud_normals',
+            output="screen",
+            condition=UnlessCondition(sim),
+        ),
+    )
+    nodes_to_start.append(
+        Node(
+            package='stack_approach',
+            executable='cloud_pose_vary',
+            name='cloud_pose_vary',
+            output="screen",
+        ),
+    )
     nodes_to_start.append(
         Node(
             package='stack_approach',
@@ -59,6 +59,16 @@ def generate_launch_description():
             }]
         ),
     )
+
+    nodes_to_start.append(
+        Node(
+            package='stack_detect',
+            executable='sam2_dino_srv',
+            name='sam2_dino_srv',
+            output="screen",
+        ),
+    )
+
 
     nodes_to_start.append(
         IncludeLaunchDescription(

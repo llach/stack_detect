@@ -27,7 +27,7 @@ class StackDetectorDINO(Node):
         self.bridge = CvBridge()
         self.cb_group = ReentrantCallbackGroup()
 
-        self.declare_parameter('cpu_only', True)
+        self.declare_parameter('cpu_only', False)
         self.cpu_only = self.get_parameter("cpu_only").get_parameter_value().bool_value
    
         self.img_sub = self.create_subscription(

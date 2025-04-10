@@ -21,7 +21,7 @@ from tf2_ros.transform_listener import TransformListener
 from tf2_geometry_msgs import PointStamped, PoseStamped
 from datetime import datetime
 from stack_msgs.action import RecordCloud
-from stack_msgs.srv import StoreData
+from stack_msgs.srv import StoreData, DINOSrv
 from stack_approach.helpers import grasp_pose_to_wrist, publish_img, point_to_pose, empty_pose, get_trafo, inv, matrix_to_pose_msg, pose_to_matrix, call_cli_sync
 from stack_detect.helpers.sam2_model import SAM2Model
 from stack_detect.helpers.dino_model import DINOModel, plot_boxes_to_image
@@ -38,7 +38,7 @@ class SAMGraspPointExtractor(Node):
         self.bridge = CvBridge()
         self.cbg = ReentrantCallbackGroup()
 
-        self.declare_parameter('dino_cpu', True)
+        self.declare_parameter('dino_cpu', False)
         self.dino_cpu = self.get_parameter("dino_cpu").get_parameter_value().bool_value
 
         self.sam = SAM2Model()
@@ -90,6 +90,23 @@ class SAMGraspPointExtractor(Node):
     def rgb_cb(self, msg): 
         with self.img_lock:
             self.img_msg = msg
+
+    def wait_for_data(self):
+        ##### wait for data and tfs
+        self.get_logger().info("waiting for data ...")
+        while self.img_msg is None or self.depth_msg is None or self.K is None: 
+            time.sleep(0.05)
+            rclpy.spin_once(self)
+
+        self.get_logger().info("waiting for transforms ...")
+        while not (
+            self.tf_buffer.can_transform("map", "wrist_3_link", rclpy.time.Time()) and
+            self.tf_buffer.can_transform("map", "camera_color_optical_frame", rclpy.time.Time())
+        ):
+            time.sleep(0.05)
+            rclpy.spin_once(self)
+        
+        self.get_logger().info("ready to grasp!")
             
     def start_recording(self):
         # Create a goal to start data collection
@@ -127,21 +144,12 @@ class SAMGraspPointExtractor(Node):
             exit(0)
 
     def extract_grasp_point(self): 
-        ##### wait for data and tfs
-        self.get_logger().info("waiting for data ...")
-        while self.img_msg is None or self.depth_msg is None or self.K is None: 
-            time.sleep(0.05)
-            rclpy.spin_once(self)
+        with self.img_lock:
+            with self.depth_lock:
+                self.depth_msg = None
+                self.img_msg = None
 
-        self.get_logger().info("waiting for transforms ...")
-        while not (
-            self.tf_buffer.can_transform("map", "wrist_3_link", rclpy.time.Time()) and
-            self.tf_buffer.can_transform("map", "camera_color_optical_frame", rclpy.time.Time())
-        ):
-            time.sleep(0.05)
-            rclpy.spin_once(self)
-        
-        self.get_logger().info("ready to grasp!")
+        self.wait_for_data()
         
         ##### Convert image
         with self.img_lock:
@@ -150,6 +158,9 @@ class SAMGraspPointExtractor(Node):
                 img = self.bridge.compressed_imgmsg_to_cv2(self.img_msg)
         img_raw = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         image_pil = Image.fromarray(img_raw, mode="RGB")
+
+        publish_img(self.img_pub, np.array(img_raw))
+
 
         #### Run DINO
         dino_start = time.time()
@@ -161,10 +172,11 @@ class SAMGraspPointExtractor(Node):
         self.get_logger().info(f"DINO took {round(time.time()-dino_start,2)}s")
         
         image_with_box = plot_boxes_to_image(image_pil.copy(), boxes_px, pred_phrases)[0]
-        publish_img(self.img_pub, cv2.cvtColor(np.array(image_with_box), cv2.COLOR_RGB2BGR))
+        publish_img(self.img_pub, np.array(image_with_box))
         
         box_idx = input("which box? ")
         try:
+            if box_idx == "": box_idx = "0"
             box_idx = int(box_idx)
             box = boxes_px[box_idx]
         except Exception as e:
@@ -178,7 +190,7 @@ class SAMGraspPointExtractor(Node):
         self.get_logger().info(f"SAM took {round(time.time()-sam_start,2)}s")
 
         img_overlay, _, line_center = SAM2Model.detect_stack(img, masks, box)
-        publish_img(self.img_pub, cv2.cvtColor(img_overlay, cv2.COLOR_RGB2BGR))
+        publish_img(self.img_pub, img_overlay)
 
         if line_center is None:
             self.get_logger().warn("Layer not found!")
@@ -192,16 +204,17 @@ class SAMGraspPointExtractor(Node):
         should_grasp = input("grasp? [d/a/Q]")
         sg = should_grasp.strip().lower()
         
-        if sg not in ["a", "d"]:
+        if sg not in ["a", "d", ""]:
             print("not grasping. bye.")
             return
         
         gh = self.start_recording()
         time.sleep(0.3)
         
-        if sg == "d":
-            # blue puffy: 0.007
-            grasp_pose_wrist = grasp_pose_to_wrist(self.tf_buffer, center_point, x_off=0.018, z_off=-0.22)
+        if sg == "d" or sg == "":
+            # larger x -> finger is higher
+            grasp_pose_wrist = grasp_pose_to_wrist(self.tf_buffer, center_point, x_off=0.018, z_off=-0.22) # HAND-E
+            # grasp_pose_wrist = grasp_pose_to_wrist(self.tf_buffer, center_point, x_off=0.025, z_off=-0.265) # BLUE GRIPPER
             self.grasp_pose_pub.publish(grasp_pose_wrist)
 
             direct_approach_grasp(self, self.move_cli, self.gripper_cli, grasp_pose_wrist, with_grasp=True)
@@ -210,30 +223,34 @@ class SAMGraspPointExtractor(Node):
             Tfw = get_trafo("finger", "wrist_3_link", self.tf_buffer)
             
             center_pose = pose_to_matrix(self.tf_buffer.transform(point_to_pose(center_point), "wrist_3_link"))
-            center_pose[:3,:3] = np.eye(3) @ R.from_euler("xyz", [0, -30, 0], degrees=True).as_matrix() 
-            center_pose = center_pose @ Tfw
-            
+
             # 1st: how much above the stack? positive = up
             # 3rd: how much into the stack? negative = further away from stack
             # center_pose[:3,3] += [0.0099,0,-0.015] # dark stack
             center_pose[:3,3] += [0.00,0,-0.03] # weird light stack
             # center_pose[:3,3] += [0.0065,0,-0.025] # light stack
+
+            center_pose[:3,:3] = np.eye(3) @ R.from_euler("xyz", [0, -30, 0], degrees=True).as_matrix() 
+            center_pose = center_pose @ Tfw
+            
+            
             print(center_pose)
     
             
             center_pose_msg = matrix_to_pose_msg(center_pose, "wrist_3_link")
             self.grasp_pose_pub.publish(center_pose_msg)
             
-            angled_approach_grasp(self, self.move_cli, self.gripper_cli, center_pose_msg, self.tf_buffer, with_grasp=True)
+            angled_approach_grasp(self, self.move_cli, self.gripper_cli, center_pose_msg, self.tf_buffer, with_grasp=True    )
         
         #### Store data
         time.sleep(0.3)
         self.stop_recording(gh)
-        should_save = input("save? [Y/n]")
+        time.sleep(0.5)
+        # should_save = input("save? [Y/n]")
 
-        if should_save.strip().lower() == "n":
-            print("not saving data. bye.")
-            return
+        # if should_save.strip().lower() == "n":
+        #     print("not saving data. bye.")
+        #     return
 
         print("saving data ...")
         
@@ -260,8 +277,14 @@ def main(args=None):
     executor = MultiThreadedExecutor(num_threads=4)
     executor.add_node(node)
 
+    node.wait_for_data()
     try:
-        node.extract_grasp_point()
+        while True:
+            node.extract_grasp_point()
+            again = input("again? [Y/n]").strip().lower()
+            if again == "y" or again == "":
+                continue
+            else: break
     except KeyboardInterrupt:
         print("Keyboard Interrupt!")
     finally:

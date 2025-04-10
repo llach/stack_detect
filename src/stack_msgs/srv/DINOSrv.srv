@@ -1,0 +1,4 @@
+float32[] image
+---
+float32[] image
+float32[] boxes_px

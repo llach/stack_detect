@@ -25,7 +25,7 @@ def direct_approach_grasp(node, move_cli, gripper_cli, start_wrist_pose, with_gr
     if with_grasp:
         node.get_logger().info("inserting ...")
         pinsert = empty_pose(frame="wrist_3_link")
-        pinsert.pose.position.z = 0.04
+        pinsert.pose.position.z = 0.07
 
         mr = MoveArm.Request()
         mr.execute = True
@@ -61,6 +61,7 @@ def direct_approach_grasp(node, move_cli, gripper_cli, start_wrist_pose, with_gr
         retr_pose_res = call_cli_sync(node, move_cli, mr)
         print(retr_pose_res)
     else:
+        print("sleeping")
         time.sleep(5)
 
     node.get_logger().info("moving back to initial pose")

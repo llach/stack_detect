@@ -13,6 +13,8 @@ find_package(rosidl_default_generators REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/MoveArm.srv"
+  "srv/DINOSrv.srv"
+  "srv/SAM2Srv.srv"
   "srv/StoreData.srv"
   "srv/GripperService.srv"
   "srv/CloudPose.srv"
