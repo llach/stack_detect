@@ -12,7 +12,7 @@ from rclpy.node import Node
 from rclpy.action import ActionClient
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup
-
+from builtin_interfaces.msg import Time
 from std_msgs.msg import Header
 from sensor_msgs.msg import Image as ImageMSG, CompressedImage, CameraInfo
 
@@ -101,6 +101,7 @@ class SAMGraspPointExtractor(Node):
         self.get_logger().info("waiting for transforms ...")
         while not (
             self.tf_buffer.can_transform("map", "wrist_3_link", rclpy.time.Time()) and
+            self.tf_buffer.can_transform("wrist_3_link", "map", rclpy.time.Time()) and
             self.tf_buffer.can_transform("map", "camera_color_optical_frame", rclpy.time.Time())
         ):
             time.sleep(0.05)
@@ -197,10 +198,9 @@ class SAMGraspPointExtractor(Node):
             return
 
         # get 3D point and publish
-        center_point = SAM2Model.get_center_point(line_center, depth_img, self.K)
+        center_point = SAM2Model.get_center_point(line_center, depth_img, self.K) # center point is stamped in camera coordinates
         self.grasp_point_pub.publish(center_point)
         
-
         should_grasp = input("grasp? [d/a/Q]")
         sg = should_grasp.strip().lower()
         
@@ -210,37 +210,54 @@ class SAMGraspPointExtractor(Node):
         
         gh = self.start_recording()
         time.sleep(0.3)
-        
+
+        # transform grasp point to pose stamped in wrist3link, apply offsets in wrist space
+        # grasp_pose_wrist = grasp_pose_to_wrist(self.tf_buffer, center_point, x_off=0.018, z_off=-0.22) # HAND-E
+        # grasp_pose_wrist = grasp_pose_to_wrist(self.tf_buffer, center_point, x_off=0.024, z_off=-0.262) # BLUE GRIPPER
+        grasp_pose_wrist = grasp_pose_to_wrist(self.tf_buffer, center_point, x_off=0.035, z_off=-0.2) # FRANKENROLLER
+
         if sg == "d" or sg == "":
-            # larger x -> finger is higher
-            grasp_pose_wrist = grasp_pose_to_wrist(self.tf_buffer, center_point, x_off=0.018, z_off=-0.22) # HAND-E
-            # grasp_pose_wrist = grasp_pose_to_wrist(self.tf_buffer, center_point, x_off=0.025, z_off=-0.265) # BLUE GRIPPER
             self.grasp_pose_pub.publish(grasp_pose_wrist)
 
-            direct_approach_grasp(self, self.move_cli, self.gripper_cli, grasp_pose_wrist, with_grasp=True)
+            direct_approach_grasp(self, self.move_cli, self.gripper_cli, grasp_pose_wrist, with_grasp=False)
         elif sg == "a":
-        
+            GOAL_ANGLE = 45 # in degrees
+            OFFSET = [0.05,0,-0.1]
+
+            self.wait_for_data()
+
             Tfw = get_trafo("finger", "wrist_3_link", self.tf_buffer)
-            
-            center_pose = pose_to_matrix(self.tf_buffer.transform(point_to_pose(center_point), "wrist_3_link"))
 
-            # 1st: how much above the stack? positive = up
-            # 3rd: how much into the stack? negative = further away from stack
-            # center_pose[:3,3] += [0.0099,0,-0.015] # dark stack
-            center_pose[:3,3] += [0.00,0,-0.03] # weird light stack
-            # center_pose[:3,3] += [0.0065,0,-0.025] # light stack
+            grasp_pose_wrist = grasp_pose_to_wrist(self.tf_buffer, center_point, x_off=0, z_off=0)
+            grasp_pose_finger = self.tf_buffer.transform(grasp_pose_wrist, "finger")                # grasp pose in finger frame
+            grasp_pose_finger_mat = pose_to_matrix(grasp_pose_finger)
 
-            center_pose[:3,:3] = np.eye(3) @ R.from_euler("xyz", [0, -30, 0], degrees=True).as_matrix() 
-            center_pose = center_pose @ Tfw
+            Tmf = get_trafo("map", "finger", self.tf_buffer)
+            current_angle_offset = np.rad2deg(np.arccos(np.dot([0,1,0], Tmf[:3,:3]@[0,0,1]))) # angle between ground plane and z axis in wrist / finger frame
+            print(current_angle_offset)
+
+            grasp_pose_finger_mat[:3,:3] = grasp_pose_finger_mat[:3,:3] @ R.from_euler("xyz", [0, -(GOAL_ANGLE - current_angle_offset), 0], degrees=True).as_matrix()
+            # Copy the rotated pose
+            grasp_pose_wrist_mat = grasp_pose_finger_mat.copy()
+
+            # Apply translation in the rotated/local frame
+            translation_local = grasp_pose_finger_mat[:3,:3] @ (Tfw[:3,3] + OFFSET)
+            grasp_pose_wrist_mat[:3,3] += translation_local
+
+
+            goal_finger = matrix_to_pose_msg(grasp_pose_wrist_mat, "finger")
+            goal_wrist = self.tf_buffer.transform(goal_finger, "wrist_3_link")         
+
+            print("publishing goal ...")
+            self.grasp_pose_pub.publish(goal_wrist)
+
+            # # 1st: how much above the stack? positive = up $##### OLD CODE
+            # # 3rd: how much into the stack? negative = further away from stack
+            # # center_pose[:3,3] += [0.0099,0,-0.015] # dark stack
+            # # center_pose[:3,3] += [0.00,0,-0.03] # weird light stack BEST FOR BLUE GRIPPER
+            # # center_pose[:3,3] += [0.0065,0,-0.025] # light stack
             
-            
-            print(center_pose)
-    
-            
-            center_pose_msg = matrix_to_pose_msg(center_pose, "wrist_3_link")
-            self.grasp_pose_pub.publish(center_pose_msg)
-            
-            angled_approach_grasp(self, self.move_cli, self.gripper_cli, center_pose_msg, self.tf_buffer, with_grasp=True    )
+            # angled_approach_grasp(self, self.move_cli, self.gripper_cli, wrist_post_wrist, self.tf_buffer, with_grasp=False)
         
         #### Store data
         time.sleep(0.3)
@@ -252,18 +269,19 @@ class SAMGraspPointExtractor(Node):
         #     print("not saving data. bye.")
         #     return
 
-        print("saving data ...")
-        
-        sample_dir = f"{os.environ['HOME']}/repos/unstack_deliverable/" + datetime.now().strftime("%Y.%m.%d_%H.%M.%S") + "/"
-        os.makedirs(sample_dir)
-        
-        image_pil.save(f"{sample_dir}/raw_image.png")
-        Image.fromarray(img_overlay, mode="RGB").save(f"{sample_dir}/sam_output.png")
+        if False:
+            print("saving data ...")
+            
+            sample_dir = f"{os.environ['HOME']}/repos/unstack_deliverable/" + datetime.now().strftime("%Y.%m.%d_%H.%M.%S") + "/"
+            os.makedirs(sample_dir)
+            
+            image_pil.save(f"{sample_dir}/raw_image.png")
+            Image.fromarray(img_overlay, mode="RGB").save(f"{sample_dir}/sam_output.png")
 
-        print("store request")
-        store_req = StoreData.Request()
-        store_req.dir = sample_dir
-        call_cli_sync(self, self.store_cli, store_req)
+            print("store request")
+            store_req = StoreData.Request()
+            store_req.dir = sample_dir
+            call_cli_sync(self, self.store_cli, store_req)
 
         self.get_logger().info("all done!")
 

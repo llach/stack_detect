@@ -88,7 +88,6 @@ def angled_approach_grasp(node, move_cli, gripper_cli, start_wrist_pose, buffer,
     mr.execute = True
     mr.target_pose = start_wrist_pose
     approach_pose_res = call_cli_sync(node, move_cli, mr)
-    print(approach_pose_res)
     
     if with_grasp:
         
@@ -105,7 +104,6 @@ def angled_approach_grasp(node, move_cli, gripper_cli, start_wrist_pose, buffer,
         mr.execution_time = 1.
         mr.target_pose = pinsert
         insert_pose_res = call_cli_sync(node, move_cli, mr)
-        print(insert_pose_res)
         
         ####
         ####        INSERT 2
@@ -119,7 +117,6 @@ def angled_approach_grasp(node, move_cli, gripper_cli, start_wrist_pose, buffer,
         mr.execution_time = 1.
         mr.target_pose = pinsert2
         insert_pose_res = call_cli_sync(node, move_cli, mr)
-        print(insert_pose_res)
         
         ####
         ####        INSERT 3
@@ -133,7 +130,6 @@ def angled_approach_grasp(node, move_cli, gripper_cli, start_wrist_pose, buffer,
         mr.execution_time = 1.
         mr.target_pose = pinsert3
         insert_pose_res = call_cli_sync(node, move_cli, mr)
-        print(insert_pose_res)
 
         node.get_logger().info("closing gripper")
         gripper_close_time = datetime.now().timestamp()
@@ -154,7 +150,6 @@ def angled_approach_grasp(node, move_cli, gripper_cli, start_wrist_pose, buffer,
         mr.execution_time = 1.
         mr.target_pose = pinsert3
         insert_pose_res = call_cli_sync(node, move_cli, mr)
-        print(insert_pose_res)
         
     else:
         time.sleep(5)

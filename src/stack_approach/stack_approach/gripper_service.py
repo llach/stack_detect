@@ -18,7 +18,7 @@ class GripperServiceClient(Node):
         if not self.sim:
             self.get_logger().info("gripper setup")
             self.gripper = RobotiqGripper()
-            self.gripper.connect("192.168.56.101", 63352)
+            self.gripper.connect("192.168.56.102", 63352)
             self.gripper.activate(auto_calibrate=False)
             self.gripper.move_and_wait_for_pos(0, 0, 0)
         else:

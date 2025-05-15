@@ -91,7 +91,7 @@ def point_to_pose(point):
     
     return pose
 
-def grasp_pose_to_wrist(tf_buffer, gp, x_off=0.005, z_off=-0.20):
+def grasp_pose_to_wrist(tf_buffer, gp, x_off=0.005, z_off=-0.20) -> PoseStamped:
     p_wrist = tf_buffer.transform(gp, "wrist_3_link")
 
     pose_wrist = PoseStamped()
