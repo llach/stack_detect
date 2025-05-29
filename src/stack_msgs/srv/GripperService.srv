@@ -1,2 +1,3 @@
 bool open
+int32 opening 0
 ---

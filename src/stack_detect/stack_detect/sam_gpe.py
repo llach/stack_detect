@@ -26,7 +26,7 @@ from stack_approach.helpers import grasp_pose_to_wrist, publish_img, point_to_po
 from stack_detect.helpers.sam2_model import SAM2Model
 from stack_detect.helpers.dino_model import DINOModel, plot_boxes_to_image
 from stack_msgs.srv import MoveArm, GripperService
-from stack_approach.grasping_primitives import direct_approach_grasp, angled_approach_grasp
+from stack_approach.grasping_primitives import direct_approach_grasp, angled_approach_grasp, dark_stack_roller, thin_stack_roller
 from scipy.spatial.transform import Rotation as R
 
 class SAMGraspPointExtractor(Node):
@@ -73,13 +73,13 @@ class SAMGraspPointExtractor(Node):
         self.grasp_point_pub = self.create_publisher(PointStamped, '/grasp_point', 10, callback_group=self.cbg)
         self.grasp_pose_pub = self.create_publisher(PoseStamped, '/debug_grasp_pose', 10, callback_group=self.cbg)
         
-        self._action_client = ActionClient(self, RecordCloud, 'collect_cloud_data', callback_group=ReentrantCallbackGroup())
-        while not self._action_client.wait_for_server(timeout_sec=1.0):
-            self.get_logger().info('data collection action not available, waiting again...')
+        # self._action_client = ActionClient(self, RecordCloud, 'collect_cloud_data', callback_group=ReentrantCallbackGroup())
+        # while not self._action_client.wait_for_server(timeout_sec=1.0):
+        #     self.get_logger().info('data collection action not available, waiting again...')
             
-        self.store_cli = self.create_client(StoreData, "store_cloud_data")
-        while not self.store_cli.wait_for_service(timeout_sec=1.0):
-            self.get_logger().info('store data service not available, waiting again...')
+        # self.store_cli = self.create_client(StoreData, "store_cloud_data")
+        # while not self.store_cli.wait_for_service(timeout_sec=1.0):
+        #     self.get_logger().info('store data service not available, waiting again...')
 
     def info_cb(self, msg): self.K = np.array(msg.k).reshape(3, 3)
             
@@ -175,7 +175,7 @@ class SAMGraspPointExtractor(Node):
         image_with_box = plot_boxes_to_image(image_pil.copy(), boxes_px, pred_phrases)[0]
         publish_img(self.img_pub, np.array(image_with_box))
         
-        box_idx = input("which box? ")
+        box_idx = input("which box? [0]")
         try:
             if box_idx == "": box_idx = "0"
             box_idx = int(box_idx)
@@ -201,28 +201,28 @@ class SAMGraspPointExtractor(Node):
         center_point = SAM2Model.get_center_point(line_center, depth_img, self.K) # center point is stamped in camera coordinates
         self.grasp_point_pub.publish(center_point)
         
-        should_grasp = input("grasp? [d/a/Q]")
+        should_grasp = input("grasp? [d/A/q]")
         sg = should_grasp.strip().lower()
         
         if sg not in ["a", "d", ""]:
             print("not grasping. bye.")
             return
         
-        gh = self.start_recording()
-        time.sleep(0.3)
+        # gh = self.start_recording()
+        # time.sleep(0.3)
 
         # transform grasp point to pose stamped in wrist3link, apply offsets in wrist space
         # grasp_pose_wrist = grasp_pose_to_wrist(self.tf_buffer, center_point, x_off=0.018, z_off=-0.22) # HAND-E
         # grasp_pose_wrist = grasp_pose_to_wrist(self.tf_buffer, center_point, x_off=0.024, z_off=-0.262) # BLUE GRIPPER
         grasp_pose_wrist = grasp_pose_to_wrist(self.tf_buffer, center_point, x_off=0.035, z_off=-0.2) # FRANKENROLLER
 
-        if sg == "d" or sg == "":
+        if sg == "d":
             self.grasp_pose_pub.publish(grasp_pose_wrist)
 
             direct_approach_grasp(self, self.move_cli, self.gripper_cli, grasp_pose_wrist, with_grasp=False)
-        elif sg == "a":
-            GOAL_ANGLE = 45 # in degrees
-            OFFSET = [0.05,0,-0.1]
+        elif sg == "a" or sg == "":
+            GOAL_ANGLE = 40 # in degrees
+            OFFSET = [0.007,0,-0.015]
 
             self.wait_for_data()
 
@@ -257,12 +257,13 @@ class SAMGraspPointExtractor(Node):
             # # center_pose[:3,3] += [0.00,0,-0.03] # weird light stack BEST FOR BLUE GRIPPER
             # # center_pose[:3,3] += [0.0065,0,-0.025] # light stack
             
-            # angled_approach_grasp(self, self.move_cli, self.gripper_cli, wrist_post_wrist, self.tf_buffer, with_grasp=False)
+            # angled_approach_grasp(self, self.move_cli, self.gripper_cli, goal_wrist, self.tf_buffer, with_grasp=False)
+            dark_stack_roller(self, self.move_cli, self.gripper_cli, goal_wrist, self.tf_buffer, with_grasp=True)
         
         #### Store data
-        time.sleep(0.3)
-        self.stop_recording(gh)
-        time.sleep(0.5)
+        # time.sleep(0.3)
+        # self.stop_recording(gh)
+        # time.sleep(0.5)
         # should_save = input("save? [Y/n]")
 
         # if should_save.strip().lower() == "n":

@@ -28,8 +28,8 @@ class GripperServiceClient(Node):
     def close(self):
         self.gripper.move_and_wait_for_pos(230, 255, 255)
 
-    def open(self):
-        self.gripper.move_and_wait_for_pos(0, 0, 0)
+    def open(self, pos=0):
+        self.gripper.move_and_wait_for_pos(pos, 0, 0)
 
     def gripper_pos(self, pos, vel=255, frc=255):
         return self.gripper.move_and_wait_for_pos(pos, vel, frc)
@@ -39,7 +39,7 @@ class GripperServiceClient(Node):
             self.get_logger().info("not executing gripper action since we're in simulation")
             return response
         
-        self.open() if request.open else self.close()
+        self.open(request.opening) if request.open else self.close()
         time.sleep(1.5)
         
         return response
