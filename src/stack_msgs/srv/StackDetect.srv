@@ -1,0 +1,4 @@
+bool store_data
+---
+bool success
+geometry_msgs/PoseStamped target_pose
