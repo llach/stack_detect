@@ -33,6 +33,7 @@ setup(
             'cloud_pose_vary = stack_approach.cloud_pose_vary:main',
             'gripper = stack_approach.gripper_service:main',
             'blue_gripper = stack_approach.blue_gripper_service:main',
+            'roller_gripper = stack_approach.roller_gripper_service:main',
         ],
     },
 )

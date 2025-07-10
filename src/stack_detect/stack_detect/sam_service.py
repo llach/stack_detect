@@ -6,7 +6,7 @@ import pickle
 import numpy as np
 
 from PIL import Image
-from threading import Lock
+from threading import Lock, Event
 from cv_bridge import CvBridge
 from rclpy.node import Node
 from rclpy.action import ActionClient
@@ -38,6 +38,10 @@ class SAMGraspPointExtractor(Node):
         self.bridge = CvBridge()
         self.cbg = ReentrantCallbackGroup()
 
+        self.img_ready = Event()
+        self.depth_ready = Event()
+        self.info_ready = Event()
+
         self.declare_parameter('dino_cpu', False)
         self.dino_cpu = self.get_parameter("dino_cpu").get_parameter_value().bool_value
 
@@ -58,60 +62,42 @@ class SAMGraspPointExtractor(Node):
             CameraInfo, '/camera/color/camera_info', self.info_cb, 0
         )
 
-        # self.move_cli = self.create_client(MoveArm, "move_arm")
-        # while not self.move_cli.wait_for_service(timeout_sec=1.0):
-        #     self.get_logger().info('move arm service not available, waiting again...')
-
-        # self.gripper_cli = self.create_client(GripperService, "gripper")
-        # while not self.gripper_cli.wait_for_service(timeout_sec=1.0):
-        #     self.get_logger().info('gripper service not available, waiting again...')
-
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         
         self.img_pub = self.create_publisher(CompressedImage, '/camera/color/sam/compressed', 0, callback_group=self.cbg)
         self.grasp_point_pub = self.create_publisher(PointStamped, '/grasp_point', 10, callback_group=self.cbg)
         self.grasp_pose_pub = self.create_publisher(PoseStamped, '/debug_grasp_pose', 10, callback_group=self.cbg)
-        
-        # self._action_client = ActionClient(self, RecordCloud, 'collect_cloud_data', callback_group=ReentrantCallbackGroup())
-        # while not self._action_client.wait_for_server(timeout_sec=1.0):
-        #     self.get_logger().info('data collection action not available, waiting again...')
-            
-        # self.store_cli = self.create_client(StoreData, "store_cloud_data")
-        # while not self.store_cli.wait_for_service(timeout_sec=1.0):
-        #     self.get_logger().info('store data service not available, waiting again...')
 
         self.srv = self.create_service(StackDetect, '/stack_detect', self.extract_grasp_point)
 
         print("stack detect service running!")
 
-    def info_cb(self, msg): self.K = np.array(msg.k).reshape(3, 3)
-            
     def depth_cb(self, msg):
         with self.depth_lock:
             self.depth_msg = msg
+            self.depth_ready.set()
 
     def rgb_cb(self, msg): 
         with self.img_lock:
             self.img_msg = msg
+            self.img_ready.set()
 
-    def wait_for_data(self):
-        ##### wait for data and tfs
-        self.get_logger().info("waiting for data ...")
-        while self.img_msg is None or self.depth_msg is None or self.K is None: 
-            time.sleep(0.05)
-            rclpy.spin_once(self)
+    def info_cb(self, msg): 
+        self.K = np.array(msg.k).reshape(3, 3)
+        self.info_ready.set()
 
-        self.get_logger().info("waiting for transforms ...")
-        while not (
-            self.tf_buffer.can_transform("map", "wrist_3_link", rclpy.time.Time()) and
-            self.tf_buffer.can_transform("wrist_3_link", "map", rclpy.time.Time()) and
-            self.tf_buffer.can_transform("map", "camera_color_optical_frame", rclpy.time.Time())
-        ):
-            time.sleep(0.05)
-            rclpy.spin_once(self)
-        
-        self.get_logger().info("ready to grasp!")
+    def wait_for_data(self, timeout=5.0):
+        self.get_logger().info("Waiting for image, depth, and camera info...")
+
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            if self.img_ready.is_set() and self.depth_ready.is_set() and self.info_ready.is_set():
+                self.get_logger().info("All data received.")
+                return True
+            time.sleep(0.05)  # passive wait, lets executor run
+        self.get_logger().warn("Timeout while waiting for data.")
+        return False
             
     def start_recording(self):
         # Create a goal to start data collection
@@ -149,27 +135,6 @@ class SAMGraspPointExtractor(Node):
             exit(0)
 
     def extract_grasp_point(self, req, res): 
-        pose = PoseStamped()
-        pose.header.frame_id = 'map'
-        pose.header.stamp = self.get_clock().now().to_msg()
-        pose.pose.position.x = 0.5
-        pose.pose.position.y = 0.0
-        pose.pose.position.z = 0.3
-        pose.pose.orientation.w = 1.0  # Identity quaternion
-
-        # Fill response
-        res.success = True
-        res.target_pose = pose
-
-        self.get_logger().info('Returning mock pose')
-        return res
-
-
-        with self.img_lock:
-            with self.depth_lock:
-                self.depth_msg = None
-                self.img_msg = None
-
         self.wait_for_data()
         
         ##### Convert image
@@ -194,14 +159,16 @@ class SAMGraspPointExtractor(Node):
         image_with_box = plot_boxes_to_image(image_pil.copy(), boxes_px, pred_phrases)[0]
         publish_img(self.img_pub, np.array(image_with_box))
         
-        box_idx = input("which box? [0]")
+        # box_idx = input("which box? [0]")
+        box_idx = 0
         try:
             if box_idx == "": box_idx = "0"
             box_idx = int(box_idx)
             box = boxes_px[box_idx]
         except Exception as e:
             print(f"box indexing error: {e}")
-            return
+            res.success = False
+            return res
 
         ##### Run SAM
         sam_start = time.time()
@@ -214,16 +181,15 @@ class SAMGraspPointExtractor(Node):
 
         if line_center is None:
             self.get_logger().warn("Layer not found!")
-            return
+            res.success = False
+            return res
 
         # get 3D point and publish
         center_point = SAM2Model.get_center_point(line_center, depth_img, self.K) # center point is stamped in camera coordinates
-        self.grasp_point_pub.publish(center_point)
-
 
         grasp_pose_wrist = grasp_pose_to_wrist(self.tf_buffer, center_point, x_off=0.035, z_off=-0.2) # FRANKENROLLER
 
-        GOAL_ANGLE = 40 # in degrees
+        GOAL_ANGLE = 45 # in degrees
         OFFSET = [0.007,0,-0.015]
 
         self.wait_for_data()
@@ -246,25 +212,11 @@ class SAMGraspPointExtractor(Node):
         translation_local = grasp_pose_finger_mat[:3,:3] @ (Tfw[:3,3] + OFFSET)
         grasp_pose_wrist_mat[:3,3] += translation_local
 
-
         goal_finger = matrix_to_pose_msg(grasp_pose_wrist_mat, "finger")
-        goal_wrist = self.tf_buffer.transform(goal_finger, "wrist_3_link")         
-       
-        if req.save_data:
-            print("saving data ...")
-            
-            sample_dir = f"{os.environ['HOME']}/repos/unstack_deliverable/" + datetime.now().strftime("%Y.%m.%d_%H.%M.%S") + "/"
-            os.makedirs(sample_dir)
-            
-            image_pil.save(f"{sample_dir}/raw_image.png")
-            Image.fromarray(img_overlay, mode="RGB").save(f"{sample_dir}/sam_output.png")
+        goal_wrist = self.tf_buffer.transform(goal_finger, "wrist_3_link")
 
-            print("store request")
-            store_req = StoreData.Request()
-            store_req.dir = sample_dir
-            call_cli_sync(self, self.store_cli, store_req)
-
-        self.get_logger().info("all done!")
+        res.success = True
+        res.target_pose = goal_wrist
         return res
 
 
