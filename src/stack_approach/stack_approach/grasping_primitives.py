@@ -169,12 +169,14 @@ def dark_stack_roller(node, move_cli, gripper_cli, start_wrist_pose, buffer, wit
     """
     with_grasp: if False, only approach and retreat are executed. useful for finding grasp point offsets faster.
     """
-    # roller = RollerGripper()
+    roller = RollerGripper()
+    roller.open()
 
-    node.get_logger().info("opening gripper")
-    gr = GripperService.Request()
-    gr.open = True
-    call_cli_sync(node, gripper_cli, gr)
+    # node.get_logger().info("opening gripper")
+    # gr = GripperService.Request()
+    # gr.open = True
+    # call_cli_sync(node, gripper_cli, gr)
+
 
     node.get_logger().info("Moving to grasp pose...")
     mr = MoveArm.Request()
@@ -187,22 +189,22 @@ def dark_stack_roller(node, move_cli, gripper_cli, start_wrist_pose, buffer, wit
         ####
         ####        INSERT 1
         ####
-        node.get_logger().info("inserting ...")
-        Tmw = get_trafo("map", "wrist_3_link", buffer)
-        Tmw[:3,3] += [0,0.0,0.005]
-        pinsert = matrix_to_pose_msg(Tmw, "map")
+        # node.get_logger().info("inserting ...")
+        # Tmw = get_trafo("map", "wrist_3_link", buffer)
+        # Tmw[:3,3] += [0,0.0,0.005]
+        # pinsert = matrix_to_pose_msg(Tmw, "map")
 
-        mr = MoveArm.Request()
-        mr.execute = True
-        mr.execution_time = 1.
-        mr.target_pose = pinsert
-        insert_pose_res = call_cli_sync(node, move_cli, mr)
+        # mr = MoveArm.Request()
+        # mr.execute = True
+        # mr.execution_time = 1.
+        # mr.target_pose = pinsert
+        # insert_pose_res = call_cli_sync(node, move_cli, mr)
         
         ####
         ####        INSERT 2
         ####
         Tmw = get_trafo("map", "wrist_3_link", buffer)
-        Tmw[:3,3] += [0,0.025,0]
+        Tmw[:3,3] += [0,0.035,0]
         pinsert2 = matrix_to_pose_msg(Tmw, "map")
 
         mr = MoveArm.Request()
@@ -214,15 +216,15 @@ def dark_stack_roller(node, move_cli, gripper_cli, start_wrist_pose, buffer, wit
         # ####
         # ####        INSERT 3
         # ####
-        Tmw = get_trafo("map", "wrist_3_link", buffer)
-        Tmw[:3,3] += [0,0,-0.015]
-        pinsert3 = matrix_to_pose_msg(Tmw, "map")
+        # Tmw = get_trafo("map", "wrist_3_link", buffer)
+        # Tmw[:3,3] += [0,0,-0.015]
+        # pinsert3 = matrix_to_pose_msg(Tmw, "map")
 
-        mr = MoveArm.Request()
-        mr.execute = True
-        mr.execution_time = 1.
-        mr.target_pose = pinsert3
-        insert_pose_res = call_cli_sync(node, move_cli, mr)
+        # mr = MoveArm.Request()
+        # mr.execute = True
+        # mr.execution_time = 1.
+        # mr.target_pose = pinsert3
+        # insert_pose_res = call_cli_sync(node, move_cli, mr)
 
         # node.get_logger().info("closing gripper a bit")
         # gripper_close_time = datetime.now().timestamp()
@@ -234,25 +236,27 @@ def dark_stack_roller(node, move_cli, gripper_cli, start_wrist_pose, buffer, wit
 
         # roller.roll(3)
 
-        node.get_logger().info("closing gripper")
-        gripper_close_time = datetime.now().timestamp()
-        node.get_logger().info(f"{gripper_close_time}")
-        gr = GripperService.Request()
-        gr.open = False
-        call_cli_sync(node, gripper_cli, gr)
+        # node.get_logger().info("closing gripper")
+        # gripper_close_time = datetime.now().timestamp()
+        # node.get_logger().info(f"{gripper_close_time}")
+        # gr = GripperService.Request()
+        # gr.open = False
+        # call_cli_sync(node, gripper_cli, gr)
+        roller.close()
+
 
         # ####
         # ####        LIFT
         # ####
-        # Tmw = get_trafo("map", "wrist_3_link", buffer)
-        # Tmw[:3,3] += [0,0,0.03]
-        # pinsert3 = matrix_to_pose_msg(Tmw, "map")
+        Tmw = get_trafo("map", "wrist_3_link", buffer)
+        Tmw[:3,3] += [0,0,0.03]
+        pinsert3 = matrix_to_pose_msg(Tmw, "map")
 
-        # mr = MoveArm.Request()
-        # mr.execute = True
-        # mr.execution_time = 1.
-        # mr.target_pose = pinsert3
-        # insert_pose_res = call_cli_sync(node, move_cli, mr)
+        mr = MoveArm.Request()
+        mr.execute = True
+        mr.execution_time = 1.
+        mr.target_pose = pinsert3
+        insert_pose_res = call_cli_sync(node, move_cli, mr)
         
     else:
         time.sleep(5)

@@ -228,7 +228,7 @@ class SAMGraspPointExtractor(Node):
 
             Tfw = get_trafo("finger", "wrist_3_link", self.tf_buffer)
 
-            grasp_pose_wrist = grasp_pose_to_wrist(self.tf_buffer, center_point, x_off=0, z_off=0)
+            grasp_pose_wrist = grasp_pose_to_wrist(self.tf_buffer, center_point, x_off=0.034, z_off=0.03)
             grasp_pose_finger = self.tf_buffer.transform(grasp_pose_wrist, "finger")                # grasp pose in finger frame
             grasp_pose_finger_mat = pose_to_matrix(grasp_pose_finger)
 
