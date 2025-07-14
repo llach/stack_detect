@@ -187,9 +187,9 @@ class SAMGraspPointExtractor(Node):
         # get 3D point and publish
         center_point = SAM2Model.get_center_point(line_center, depth_img, self.K) # center point is stamped in camera coordinates
 
-        grasp_pose_wrist = grasp_pose_to_wrist(self.tf_buffer, center_point, x_off=0.035, z_off=-0.2) # FRANKENROLLER
+        grasp_pose_wrist = grasp_pose_to_wrist(self.tf_buffer, center_point, x_off=0.045, z_off=-0.20) # FRANKENROLLER
 
-        GOAL_ANGLE = 45 # in degrees
+        GOAL_ANGLE = 50 # in degrees
         OFFSET = [0.007,0,-0.015]
 
         self.wait_for_data()
@@ -214,6 +214,9 @@ class SAMGraspPointExtractor(Node):
 
         goal_finger = matrix_to_pose_msg(grasp_pose_wrist_mat, "finger")
         goal_wrist = self.tf_buffer.transform(goal_finger, "wrist_3_link")
+
+        goal_wrist.pose.position.x += 0.025
+        # goal_wrist.pose.position.z -= 0.01
 
         res.success = True
         res.target_pose = goal_wrist
