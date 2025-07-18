@@ -151,13 +151,12 @@ def plot_boxes_to_image(image_pil, boxes, labels):
 
 class DINOModel:
 
-    def __init__(self, cpu_only=False):
+    def __init__(self, cpu_only=False, prefix=f"{os.environ['HOME']}/repos/"):
         self.cpu_only = cpu_only
         self.box_threshold = 0.3
         self.text_threshold = 0.25
         self.token_spans = None
-        prefix = f"{os.environ['HOME']}/repos/"
-        self.model = load_model(prefix+"GroundingDINO/groundingdino/config/GroundingDINO_SwinT_OGC.py", prefix+"ckp/groundingdino_swint_ogc.pth", cpu_only=self.cpu_only)
+        self.model = load_model(prefix+"/GroundingDINO_SwinT_OGC.py", prefix+"/groundingdino_swint_ogc.pth", cpu_only=self.cpu_only)
 
     def predict(self, image_pil, prompt):
         return get_grounding_output(

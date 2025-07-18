@@ -45,8 +45,8 @@ class SAMGraspPointExtractor(Node):
         self.declare_parameter('dino_cpu', False)
         self.dino_cpu = self.get_parameter("dino_cpu").get_parameter_value().bool_value
 
-        self.sam = SAM2Model()
-        self.dino = DINOModel(cpu_only=self.dino_cpu)
+        self.sam = SAM2Model(checkpoint = f"/home/ros/pretrained/sam2/sam2.1_hiera_large.pt", model_cfg = "//home/ros/pretrained/sam2/sam2.1_hiera_l.yaml")
+        self.dino = DINOModel(prefix="/home/ros/pretrained/dino/",cpu_only=self.dino_cpu)
 
         self.img_lock = Lock()
         self.depth_lock = Lock()

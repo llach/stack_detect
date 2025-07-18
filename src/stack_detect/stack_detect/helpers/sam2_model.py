@@ -235,10 +235,10 @@ class SAM2Model:
         points_per_batch = 44, 
         pred_iou_thresh = 0.7,
         stability_score_thresh=0.8,
-        stability_score_offset=0.7
-    ):
-        checkpoint = f"{os.environ['HOME']}/repos/ckp/sam2.1_hiera_large.pt"
+        stability_score_offset=0.7,
+        checkpoint = f"{os.environ['HOME']}/repos/ckp/sam2.1_hiera_large.pt",
         model_cfg = "configs/sam2.1/sam2.1_hiera_l.yaml"
+    ):
 
         self.mask_generator = SAM2AutomaticMaskGenerator(
             model=build_sam2(model_cfg, checkpoint),
