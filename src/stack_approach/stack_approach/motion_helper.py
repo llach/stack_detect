@@ -9,11 +9,9 @@ from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from sensor_msgs.msg import JointState
 from moveit_msgs.msg import DisplayRobotState
 from tf2_geometry_msgs import PoseStamped
-from geometry_msgs.msg import Pose, Point, Quaternion
 from scipy.spatial.transform import Rotation as R
 
 from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallbackGroup
-from controller_manager_msgs.srv import SwitchController, ListControllers
 
 from std_msgs.msg import Header
 from moveit_msgs.srv import GetPositionIK
@@ -24,7 +22,7 @@ from tf2_ros.transform_listener import TransformListener
 from stack_approach.helpers import call_cli_sync
 
 class MotionHelper:
-    TRAJ_CTRL = "scaled_joint_trajectory_controller"
+    TRAJ_CTRL = "right_arm_joint_trajectory_controller"
 
     def __init__(self, node) -> None:
         self.n = node
@@ -43,17 +41,6 @@ class MotionHelper:
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self.n)
-
-        # Set up service clients
-        self.switch_controller_client = self.n.create_client(SwitchController, '/controller_manager/switch_controller')
-        self.list_controllers_client = self.n.create_client(ListControllers, '/controller_manager/list_controllers')
-        
-        # Wait for the services to be available
-        self.switch_controller_client.wait_for_service()
-        self.list_controllers_client.wait_for_service()
-        
-        # Call to switch controller if needed
-        self.check_and_switch_controller()
 
         self.traj_client = ActionClient(
             self.n, 
@@ -87,47 +74,13 @@ class MotionHelper:
 
         self.log.info("MH setup done")
 
-    def check_and_switch_controller(self):
-        # Check active controllers
-        list_controllers_request = ListControllers.Request()
-        future = self.list_controllers_client.call_async(list_controllers_request)
-        rclpy.spin_until_future_complete(self.n, future)
-        
-        if future.result() is not None:
-            controllers = future.result().controller
-            active_controllers = [controller.name for controller in controllers if controller.state == 'active']
-            
-            self.n.get_logger().info(f"{active_controllers}")
-            # Check if joint_trajectory_controller is active
-            if 'joint_trajectory_controller' in active_controllers or "scaled_joint_trajectory_controller" not in active_controllers:
-                self.n.get_logger().info("joint_trajectory_controller is active, switching to scaled_joint_trajectory_controller.")
-                
-                # Set up the request to switch controllers
-                switch_request = SwitchController.Request()
-                switch_request.deactivate_controllers = ['joint_trajectory_controller']
-                switch_request.activate_controllers = ['scaled_joint_trajectory_controller']
-                switch_request.strictness = SwitchController.Request.BEST_EFFORT
-
-                # Call the switch_controller service
-                switch_future = self.switch_controller_client.call_async(switch_request)
-                rclpy.spin_until_future_complete(self.n, switch_future)
-                
-                if switch_future.result() is not None:
-                    self.n.get_logger().info("Successfully switched to scaled_joint_trajectory_controller.")
-                else:
-                    self.n.get_logger().error("Failed to switch controllers.")
-            else:
-                self.n.get_logger().info("joint_trajectory_controller is not active, no switch needed.")
-        else:
-            self.n.get_logger().error("Failed to list controllers.")
-
     def moveit_IK(self, pose, state=None, ik_link="wrist_3_link", ntries=50):
         if state is None: state = self.current_q.copy()
 
         for i in range(ntries):
             self.n.get_logger().info(f"IK try {i}")
             ik_req = GetPositionIK.Request()
-            ik_req.ik_request.group_name = "ur_manipulator"
+            ik_req.ik_request.group_name = "right_arm"
             ik_req.ik_request.robot_state.joint_state.name = list(state.keys())
             ik_req.ik_request.robot_state.joint_state.position = list(state.values())
             ik_req.ik_request.ik_link_name = ik_link
@@ -168,6 +121,7 @@ class MotionHelper:
                 )
             ]
         )
+        self.log.info(f"{traj_goal}")
         return traj_goal
 
     def get_wrist_pose(self):
@@ -224,50 +178,3 @@ class MotionHelper:
     
     def get_trafo(self, fro, to):
         return self.tf_msg_to_matrix(self.tf_buffer.lookup_transform(fro, to, rclpy.time.Time()))
-    
-    def move_rel(self, xyz, d, pose, secs):
-        cs = [c for c in xyz.lower()]
-        assert len(xyz)==1
-
-        t = [0,0,0]
-        for c in cs:
-            c=c.lower()
-            if c == "x": t[0] = d
-            elif c == "y": t[1] = d
-            elif c == "z": t[2] = d
-            else:
-                assert False, f"{c} not a valid dimension"
-
-        pose.pose.position.x += t[0]
-        pose.pose.position.y += t[1]
-        pose.pose.position.z += t[2]
-
-        qs = self.moveit_IK(pose)
-        if qs is None:
-            return False
-        self.send_traj_blocking(qs, secs)
-        return True
-    
-    def move_relative_wrist(self, xyz, dist, secs=5):
-        d = dist
-        for i in range(50):
-            print(f"IK try {i} dist {d}")
-            ret = self.move_rel(xyz, d, self.get_wrist_pose(), secs)
-            if ret: return True
-
-            d = np.random.uniform(dist-0.1*d, dist+0.1*d)
-
-    
-    def move_relative_map(self, xyz, dist, secs=5):
-        d = dist
-        for i in range(50):
-            print(f"IK try {i} dist {d}")
-            ret = self.move_rel(
-                xyz, 
-                d, 
-                self.matrix_to_pose_msg(self.get_trafo("map", "wrist_3_link"), "map"),
-                secs
-            )
-            if ret: return True
-
-            d = np.random.uniform(dist-0.1*d, dist+0.1*d)

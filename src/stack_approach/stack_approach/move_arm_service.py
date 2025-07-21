@@ -4,6 +4,7 @@ import time
 import rclpy
 from rclpy.node import Node
 from stack_approach.motion_helper import MotionHelper
+from stack_approach.controller_switcher import ControllerSwitcher
 from rclpy.executors import MultiThreadedExecutor
 
 
@@ -14,10 +15,12 @@ class MoveArmService(Node):
 
         self.srv = self.create_service(MoveArm, 'move_arm', self.srv_callback)
         self.mh = MotionHelper(self)
+        self.controller_switcher = ControllerSwitcher()
 
         self.get_logger().info("setup done!")
 
     def srv_callback(self, request, response):
+        self.controller_switcher.activate_controller(request.controller_name)
 
         if len(request.q_target) > 0:
             self.get_logger().info(f"executing q_target {request.q_target} ...")
@@ -29,6 +32,7 @@ class MoveArmService(Node):
             return response
 
         q_start = self.mh.current_q.copy()
+        self.get_logger().info(f"q_start {q_start}")
 
         if q_start is None:
             self.get_logger().error("No joint states yet!")
@@ -37,6 +41,9 @@ class MoveArmService(Node):
 
         self.get_logger().info("doing IK ...")
         q_target = self.mh.moveit_IK(state=q_start, pose=request.target_pose, ik_link=request.ik_link)
+        q_target = { jname: q_target[jname] for jname in request.name_target }
+        self.get_logger().info(f"q_target {q_target}")
+
         if q_target is None:
             self.get_logger().error("IK error!")
             response.success = False
