@@ -139,8 +139,8 @@ def plot_boxes_to_image(image_pil, boxes, labels):
         draw.rectangle(bbox, fill=color)
         draw.text((x0, y0), str(label), fill="white")
         
-        font = ImageFont.load_default(35)
-         # Calculate the center of the bounding box
+        font = ImageFont.load_default()
+        # Calculate the center of the bounding box
         center_x = (x0 + x1) / 2
         center_y = (y0 + y1) / 2
         draw.text((center_x, center_y), str(i), fill="white", font=font)

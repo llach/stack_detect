@@ -8,7 +8,7 @@ from std_msgs.msg import Header
 from geometry_msgs.msg import PoseStamped, TransformStamped, PointStamped
 
 bridge = CvBridge()
-def publish_img(pub, img, frame="camera_color_optical_frame"):
+def publish_img(pub, img, frame="right_arm_l515_color_optical_frame"):
     msg = bridge.cv2_to_compressed_imgmsg(cv2.cvtColor(np.array(img), cv2.COLOR_BGR2RGB), "jpeg")
     msg.header = Header(
         frame_id=frame,
@@ -16,7 +16,7 @@ def publish_img(pub, img, frame="camera_color_optical_frame"):
     )
     pub.publish(msg)
 
-def pixel_to_point(pixel, depth, K, frame="camera_color_optical_frame"):
+def pixel_to_point(pixel, depth, K, frame="right_arm_l515_color_optical_frame"):
     px, py = pixel
     fx, fy = K[0, 0], K[1, 1]
     cx, cy = K[0, 2], K[1, 2]
@@ -92,7 +92,9 @@ def point_to_pose(point):
     return pose
 
 def grasp_pose_to_wrist(tf_buffer, gp, x_off=0.005, z_off=-0.20) -> PoseStamped:
-    p_wrist = tf_buffer.transform(gp, "wrist_3_link")
+    gp.header.stamp.sec = 0
+    gp.header.stamp.nanosec = 0
+    p_wrist = tf_buffer.transform(gp, "right_arm_wrist_3_link")
 
     pose_wrist = PoseStamped()
     pose_wrist.header = p_wrist.header
@@ -161,6 +163,6 @@ def inv(T):
     return Ti
 
 def finger_matrix_to_wrist_pose(Tf, buffer, frame_id="map"):
-    Twf = get_trafo("wrist_3_link", "finger", buffer)
+    Twf = get_trafo("right_arm_wrist_3_link", "finger", buffer)
     Tfw = inv(Twf)
     return matrix_to_pose_msg(Tf@Tfw, frame_id)

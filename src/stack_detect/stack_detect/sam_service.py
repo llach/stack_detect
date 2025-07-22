@@ -194,13 +194,13 @@ class SAMGraspPointExtractor(Node):
 
         self.wait_for_data()
 
-        Tfw = get_trafo("finger", "wrist_3_link", self.tf_buffer)
+        Tfw = get_trafo("right_finger", "right_arm_wrist_3_link", self.tf_buffer)
 
         grasp_pose_wrist = grasp_pose_to_wrist(self.tf_buffer, center_point, x_off=0, z_off=0)
-        grasp_pose_finger = self.tf_buffer.transform(grasp_pose_wrist, "finger")                # grasp pose in finger frame
+        grasp_pose_finger = self.tf_buffer.transform(grasp_pose_wrist, "right_finger")                # grasp pose in finger frame
         grasp_pose_finger_mat = pose_to_matrix(grasp_pose_finger)
 
-        Tmf = get_trafo("map", "finger", self.tf_buffer)
+        Tmf = get_trafo("map", "right_finger", self.tf_buffer)
         current_angle_offset = np.rad2deg(np.arccos(np.dot([0,1,0], Tmf[:3,:3]@[0,0,1]))) # angle between ground plane and z axis in wrist / finger frame
         print(current_angle_offset)
 
@@ -212,8 +212,8 @@ class SAMGraspPointExtractor(Node):
         translation_local = grasp_pose_finger_mat[:3,:3] @ (Tfw[:3,3] + OFFSET)
         grasp_pose_wrist_mat[:3,3] += translation_local
 
-        goal_finger = matrix_to_pose_msg(grasp_pose_wrist_mat, "finger")
-        goal_wrist = self.tf_buffer.transform(goal_finger, "wrist_3_link")
+        goal_finger = matrix_to_pose_msg(grasp_pose_wrist_mat, "right_finger")
+        goal_wrist = self.tf_buffer.transform(goal_finger, "right_arm_wrist_3_link")
 
         goal_wrist.pose.position.x += 0.025
         # goal_wrist.pose.position.z -= 0.01
