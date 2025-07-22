@@ -33,7 +33,7 @@ class MoveArmService(Node):
 
         q_start = self.mh.current_q.copy()
         self.get_logger().info(f"q_start {q_start}")
-
+        self.get_logger().info(f"{request.target_pose}")
         if q_start is None:
             self.get_logger().error("No joint states yet!")
             response.success = False

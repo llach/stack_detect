@@ -87,6 +87,7 @@ class MotionHelper:
             ik_req.ik_request.pose_stamped = pose
 
             res = self.ik_client.call(ik_req)
+            self.log.info(f"{res}")
 
             if res.error_code.val != 1:
                 # print(f"moveit error {res.error_code}")

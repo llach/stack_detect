@@ -191,6 +191,7 @@ class SAMGraspPointExtractor(Node):
 
         GOAL_ANGLE = 50 # in degrees
         OFFSET = [0.007,0,-0.015]
+        MAP_OFFSET = [0,-0.035,-0.005]
 
         self.wait_for_data()
 
@@ -201,6 +202,7 @@ class SAMGraspPointExtractor(Node):
         grasp_pose_finger_mat = pose_to_matrix(grasp_pose_finger)
 
         Tmf = get_trafo("map", "right_finger", self.tf_buffer)
+        Tmf[:3,3] = Tmf[:3,3] + MAP_OFFSET
         current_angle_offset = np.rad2deg(np.arccos(np.dot([0,1,0], Tmf[:3,:3]@[0,0,1]))) # angle between ground plane and z axis in wrist / finger frame
         print(current_angle_offset)
 
@@ -213,7 +215,13 @@ class SAMGraspPointExtractor(Node):
         grasp_pose_wrist_mat[:3,3] += translation_local
 
         goal_finger = matrix_to_pose_msg(grasp_pose_wrist_mat, "right_finger")
-        goal_wrist = self.tf_buffer.transform(goal_finger, "right_arm_wrist_3_link")
+
+        goal_map = self.tf_buffer.transform(goal_finger, "map")
+        goal_map.pose.position.x += MAP_OFFSET[0]
+        goal_map.pose.position.y += MAP_OFFSET[1]
+        goal_map.pose.position.z += MAP_OFFSET[2]
+
+        goal_wrist = self.tf_buffer.transform(goal_map, "right_arm_wrist_3_link")
 
         goal_wrist.pose.position.x += 0.025
         # goal_wrist.pose.position.z -= 0.01
