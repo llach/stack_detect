@@ -1,9 +1,11 @@
 bool execute False
+bool execute_trajectory False
 bool blocking True
 string controller_name "dual_arm_joint_trajectory_controller"
 string ik_link "wrist_3_link"
 float32 execution_time 3.0
 geometry_msgs/PoseStamped target_pose
+trajectory_msgs/JointTrajectory joint_trajectory
 float32[] q_target
 string[] name_target
 ---
