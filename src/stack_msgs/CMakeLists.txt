@@ -9,6 +9,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 
 find_package(geometry_msgs REQUIRED)
+find_package(trajectory_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
@@ -22,7 +23,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/CloudPose.srv"
   "srv/CloudPoseVary.srv"
   "action/RecordCloud.action"
-  DEPENDENCIES geometry_msgs # Add packages that above messages depend on, in this case geometry_msgs for Sphere.msg
+  DEPENDENCIES geometry_msgs trajectory_msgs # Add packages that above messages depend on, in this case geometry_msgs for Sphere.msg
 )
 
 
