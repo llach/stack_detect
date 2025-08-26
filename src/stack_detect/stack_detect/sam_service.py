@@ -223,8 +223,8 @@ class SAMGraspPointExtractor(Node):
 
         goal_wrist = self.tf_buffer.transform(goal_map, "right_arm_wrist_3_link")
 
-        goal_wrist.pose.position.x += 0.025
-        # goal_wrist.pose.position.z -= 0.01
+        # goal_wrist.pose.position.x += 0.025
+        goal_wrist.pose.position.z += 0.01
 
         res.success = True
         res.target_pose = goal_wrist
