@@ -35,7 +35,7 @@ def generate_launch_description():
         Node(
             package="tf2_ros",
             executable="static_transform_publisher",
-            arguments="--x -0.021 --z 0.18 --frame-id right_arm_wrist_3_link --child-frame-id right_finger".split(" "),
+            arguments="--x -0.021 --z 0.18 --yaw -0.17 --frame-id right_arm_wrist_3_link --child-frame-id right_finger".split(" "),
             output="both",
         )
     )
