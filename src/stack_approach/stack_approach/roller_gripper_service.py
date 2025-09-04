@@ -7,35 +7,51 @@ from rclpy.executors import MultiThreadedExecutor
 import stack_approach.Engine_Activation_XM as xm
 from stack_msgs.srv import RollerGripper
 
-class RollerGripperService(Node):
-    LEFT_FINGER_PORT = 1
-    LEFT_ROLLER_PORT = 2
+CAMERA_FINGER_PORT = 1
+CAMERA_ROLLER_PORT = 2
+NORMAL_FINGER_PORT = 3
+NORMAL_ROLLER_PORT = 4
 
+class RollerGripperService(Node):
     def __init__(self):
         super().__init__('roller_gripper')
 
-        self.srv = self.create_service(RollerGripper, 'roller_gripper', self.srv_callback)
+        self.declare_parameter("finger_port", 1)
+        self.declare_parameter("roller_port", 2)
 
-        self.portHandler, self.packetHandler = xm.open_port(self.LEFT_FINGER_PORT)
+        self.FINGER_PORT = self.get_parameter('finger_port').get_parameter_value().integer_value
+        self.ROLLER_PORT = self.get_parameter('roller_port').get_parameter_value().integer_value
 
-        xm.set_operating_mode([self.LEFT_FINGER_PORT], "position_mode", self.portHandler, self.packetHandler)
-        xm.set_operating_mode([self.LEFT_ROLLER_PORT], "velocity_mode", self.portHandler, self.packetHandler)
+        assert self.FINGER_PORT in [CAMERA_FINGER_PORT, NORMAL_FINGER_PORT], f"unknown finger port {self.FINGER_PORT}"
+        assert self.ROLLER_PORT in [CAMERA_ROLLER_PORT, NORMAL_ROLLER_PORT], f"unknown roller port {self.ROLLER_PORT}"
 
-        xm.set_torque([self.LEFT_ROLLER_PORT], True, self.portHandler, self.packetHandler)
-        xm.set_torque([self.LEFT_FINGER_PORT], True, self.portHandler, self.packetHandler)
+        self.SRV_PREFIX = "right" if self.FINGER_PORT == CAMERA_FINGER_PORT else "left"
+        
+        self.srv = self.create_service(RollerGripper, f'{self.SRV_PREFIX}_roller_gripper', self.srv_callback)
+
+        self.portHandler, self.packetHandler = xm.open_port(self.FINGER_PORT)
+
+        xm.set_operating_mode([self.FINGER_PORT], "position_mode", self.portHandler, self.packetHandler)
+        xm.set_operating_mode([self.ROLLER_PORT], "velocity_mode", self.portHandler, self.packetHandler)
+
+        xm.set_torque([self.ROLLER_PORT], True, self.portHandler, self.packetHandler)
+        xm.set_torque([self.FINGER_PORT], True, self.portHandler, self.packetHandler)
 
         self.get_logger().info("setup done!")
 
     def srv_callback(self, req, res):
         if req.finger_pos != -1:
-            assert 700 <= req.finger_pos <= 2500, f"invalid finger position {req.finger_pos}" 
-            xm.pos_control([self.LEFT_FINGER_PORT],[req.finger_pos], self.portHandler, self.packetHandler)
+            if self.FINGER_PORT == CAMERA_FINGER_PORT:
+                assert 700 <= req.finger_pos <= 2500, f"invalid finger position {req.finger_pos}"
+            elif self.FINGER_PORT == NORMAL_FINGER_PORT:
+                assert 2000 <= req.finger_pos <= 3500, f"invalid finger position {req.finger_pos}"
+            xm.pos_control([self.FINGER_PORT],[req.finger_pos], self.portHandler, self.packetHandler)
             time.sleep(.5)
         elif req.roller_duration != -1:
             assert -100 <= req.roller_vel <= 100, f"invalid roller velocity {req.roller_vel}" 
-            xm.vel_control([self.LEFT_ROLLER_PORT],[req.roller_vel], self.portHandler, self.packetHandler)
+            xm.vel_control([self.ROLLER_PORT],[req.roller_vel], self.portHandler, self.packetHandler)
             time.sleep(req.roller_duration)
-            xm.vel_control([self.LEFT_ROLLER_PORT],[0], self.portHandler, self.packetHandler)
+            xm.vel_control([self.ROLLER_PORT],[0], self.portHandler, self.packetHandler)
         else:
             print("malformed request")
             res.success = False
