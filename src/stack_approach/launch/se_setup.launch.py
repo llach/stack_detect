@@ -23,7 +23,7 @@ def generate_launch_description():
             output="screen",
             parameters=[{
                 'finger_port': 1,
-                'roller_port': 2
+                'roller_port': 2,
             }]
         ),
     )
@@ -34,25 +34,25 @@ def generate_launch_description():
             name='left_roller_gripper',
             output="screen",
             parameters=[{
-                'finger_port': 3,
-                'roller_port': 4
+                'finger_port': 4,
+                'roller_port': 3,
             }]
         ),
     )
-    # nodes_to_start.append(
-    #     Node(
-    #         package="tf2_ros",
-    #         executable="static_transform_publisher",
-    #         arguments="--yaw 3.1415 --frame-id map --child-frame-id world".split(" "),
-    #         output="both",
-    #     ),
-    # )
-    # nodes_to_start.append(
-    #     Node(
-    #         package="tf2_ros",
-    #         executable="static_transform_publisher",
-    #         arguments="--x -0.021 --z 0.18 --yaw -0.2094 --frame-id right_arm_wrist_3_link --child-frame-id right_finger".split(" "),
-    #         output="both",
-    #     )
-    # )
+    nodes_to_start.append(
+        Node(
+            package="tf2_ros",
+            executable="static_transform_publisher",
+            arguments="--yaw 3.1415 --frame-id map --child-frame-id world".split(" "),
+            output="both",
+        ),
+    )
+    nodes_to_start.append(
+        Node(
+            package="tf2_ros",
+            executable="static_transform_publisher",
+            arguments="--x -0.021 --z 0.18 --yaw -0.2094 --frame-id right_arm_wrist_3_link --child-frame-id right_finger".split(" "),
+            output="both",
+        )
+    )
     return LaunchDescription(nodes_to_start)  

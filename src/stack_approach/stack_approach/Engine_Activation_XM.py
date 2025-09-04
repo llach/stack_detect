@@ -39,28 +39,129 @@ LEN_CURRENT_LIMIT       = 2
 LEN_GOAL_POSITION       = 4
 
 
+import serial.tools.list_ports
+from dynamixel_sdk import *  # PortHandler, PacketHandler
+
 # Funció per detectar el port automàticament
 def detect_dynamixel_port(DXL_ID):
-    
     ports = serial.tools.list_ports.comports()
     for port in ports:
+        # Només considerem ports USB
+        if "USB" not in port.device:
+            continue
+
         portHandler = PortHandler(port.device)
         try:
             # Intenta obrir el port
-            if portHandler.openPort():
-                if portHandler.setBaudRate(BAUDRATE):
-                    packetHandler = PacketHandler(PROTOCOL_VERSION)
-                    # Intenta activar el torque per comprovar la connexió
-                    dxl_comm_result, dxl_error = packetHandler.write1ByteTxRx(portHandler, DXL_ID, ADDR_TORQUE_ENABLE, TORQUE_ENABLE)
-                    if dxl_comm_result == COMM_SUCCESS and dxl_error == 0:
-                        print(f"Port detectat per motor ID{DXL_ID}: {port.device}")
-                        portHandler.closePort()  # Tanquem el port perquè el codi principal el pugui utilitzar
-                        return port.device  # Retorna el nom del port correcte
-                portHandler.closePort()  # Tanca el port si no és el correcte
-        except:
-            print("skipping", port.device)
+            if not portHandler.openPort():
+                # Si ja està bloquejat, intentem tancar i reobrir
+                try:
+                    portHandler.closePort()
+                except:
+                    pass
+                if not portHandler.openPort():
+                    print(f"No s'ha pogut obrir el port {port.device}, saltant…")
+                    continue
+
+            # Configurem la velocitat en bauds
+            if not portHandler.setBaudRate(BAUDRATE):
+                print(f"No s'ha pogut establir el baudrate per {port.device}, saltant…")
+                portHandler.closePort()
+                continue
+
+            packetHandler = PacketHandler(PROTOCOL_VERSION)
+            # Intenta activar el torque per comprovar la connexió
+            dxl_comm_result, dxl_error = packetHandler.write1ByteTxRx(
+                portHandler, DXL_ID, ADDR_TORQUE_ENABLE, TORQUE_ENABLE
+            )
+
+            if dxl_comm_result == COMM_SUCCESS and dxl_error == 0:
+                print(f"Port detectat per motor ID{DXL_ID}: {port.device}")
+                portHandler.closePort()  # Tanquem el port perquè el codi principal el pugui utilitzar
+                return port.device  # Retorna el nom del port correcte
+            else:
+                print(f"Motor ID{DXL_ID} no responent a {port.device}, saltant…")
+
+            portHandler.closePort()  # Tanca el port si no és el correcte
+
+        except Exception as e:
+            print(f"Error amb {port.device}: {e}")
+            try:
+                portHandler.closePort()
+            except:
+                pass
+
     print(f"No s'ha trobat cap port correcte per al motor amb ID{DXL_ID}")
-    return None  # Si no troba cap port correcte, retorna None
+    return None
+
+def detect_dynamixel_port_for_device(DXL_ID, usb_device):
+    """
+    Try to use a specific USB device (e.g., /dev/ttyUSB0) for a given motor ID.
+    Closes the port if it was left open previously.
+    Returns the device path if successful, None otherwise.
+    """
+    portHandler = PortHandler(usb_device)
+
+    try:
+        # Try to open the port
+        if not portHandler.openPort():
+            # If the port was left open or busy, close and retry
+            try:
+                portHandler.closePort()
+            except:
+                pass
+            if not portHandler.openPort():
+                print(f"No s'ha pogut obrir el port {usb_device}")
+                return None
+
+        # Set baud rate
+        if not portHandler.setBaudRate(BAUDRATE):
+            print(f"No s'ha pogut establir el baudrate per {usb_device}")
+            portHandler.closePort()
+            return None
+
+        packetHandler = PacketHandler(PROTOCOL_VERSION)
+        # Try enabling torque to check if motor ID responds
+        dxl_comm_result, dxl_error = packetHandler.write1ByteTxRx(
+            portHandler, DXL_ID, ADDR_TORQUE_ENABLE, TORQUE_ENABLE
+        )
+
+        if dxl_comm_result == COMM_SUCCESS and dxl_error == 0:
+            print(f"Motor ID{DXL_ID} detectat a {usb_device}")
+            portHandler.closePort()
+            return usb_device
+        else:
+            print(f"Motor ID{DXL_ID} no responent a {usb_device}")
+            portHandler.closePort()
+            return None
+
+    except Exception as e:
+        print(f"Error amb {usb_device}: {e}")
+        try:
+            portHandler.closePort()
+        except:
+            pass
+        return None
+    
+
+def open_port_by_device(DXL_ID, usb_device):
+
+    PORT = detect_dynamixel_port_for_device(DXL_ID, usb_device)
+    portHandler = PortHandler(PORT)
+    packetHandler = PacketHandler(PROTOCOL_VERSION)
+
+    # Open port
+    if not portHandler.openPort():
+        print("Failed to open port")
+        quit()
+
+    # Set port baudrate
+    if not portHandler.setBaudRate(BAUDRATE):
+        print("Failed to change the baudrate")
+    print(f"Port: {PORT} obert")
+    return portHandler, packetHandler
+
+
 
 def open_port(DXL_ID):
 

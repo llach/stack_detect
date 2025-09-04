@@ -9,8 +9,8 @@ from stack_msgs.srv import RollerGripper
 
 CAMERA_FINGER_PORT = 1
 CAMERA_ROLLER_PORT = 2
-NORMAL_FINGER_PORT = 3
-NORMAL_ROLLER_PORT = 4
+NORMAL_ROLLER_PORT = 3
+NORMAL_FINGER_PORT = 4
 
 class RollerGripperService(Node):
     def __init__(self):
@@ -29,7 +29,7 @@ class RollerGripperService(Node):
         
         self.srv = self.create_service(RollerGripper, f'{self.SRV_PREFIX}_roller_gripper', self.srv_callback)
 
-        self.portHandler, self.packetHandler = xm.open_port(self.FINGER_PORT)
+        self.portHandler, self.packetHandler = xm.open_port_by_device(self.FINGER_PORT, f"/dev/dynamixel_{self.SRV_PREFIX}")
 
         xm.set_operating_mode([self.FINGER_PORT], "position_mode", self.portHandler, self.packetHandler)
         xm.set_operating_mode([self.ROLLER_PORT], "velocity_mode", self.portHandler, self.packetHandler)
