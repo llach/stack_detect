@@ -55,4 +55,12 @@ def generate_launch_description():
             output="both",
         )
     )
+    nodes_to_start.append(
+        Node(
+            package="tf2_ros",
+            executable="static_transform_publisher",
+            arguments="--frame-id right_arm_l515_link --child-frame-id camera_link".split(" "),
+            output="both",
+        )
+    )
     return LaunchDescription(nodes_to_start)  
