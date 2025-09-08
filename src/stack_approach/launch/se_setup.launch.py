@@ -7,14 +7,14 @@ from launch_ros.actions import Node
 def generate_launch_description():
 
     nodes_to_start = []
-    # nodes_to_start.append(
-    #     Node(
-    #         package='stack_approach',
-    #         executable='move_arm_service',
-    #         name='move_arm_service',
-    #         output="screen"
-    #     ),
-    # )
+    nodes_to_start.append(
+        Node(
+            package='stack_approach',
+            executable='move_arm_service',
+            name='move_arm_service',
+            output="screen"
+        ),
+    )
     nodes_to_start.append(
         Node(
             package='stack_approach',

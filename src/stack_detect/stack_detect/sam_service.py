@@ -226,6 +226,10 @@ class SAMGraspPointExtractor(Node):
         # goal_wrist.pose.position.x += 0.025
         goal_wrist.pose.position.z += 0.01
 
+
+        print("publishing goal ...")
+        self.grasp_pose_pub.publish(goal_wrist)
+
         res.success = True
         res.target_pose = goal_wrist
         return res
