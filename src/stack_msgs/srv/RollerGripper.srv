@@ -1,5 +1,5 @@
 int32 finger_pos -1
 int32 roller_vel -1
-int32 roller_duration -1
+float32 roller_duration -1
 ---
 bool success

@@ -40,7 +40,10 @@ class RollerGripperService(Node):
         self.get_logger().info("setup done!")
 
     def srv_callback(self, req, res):
+        self.get_logger().info(f"got gripper request\n{req}")
+
         if req.finger_pos != -1:
+            self.get_logger().info(f"moving finger to {req.finger_pos}")
             if self.FINGER_PORT == CAMERA_FINGER_PORT:
                 assert 700 <= req.finger_pos <= 2500, f"invalid finger position {req.finger_pos}"
             elif self.FINGER_PORT == NORMAL_FINGER_PORT:
@@ -48,6 +51,8 @@ class RollerGripperService(Node):
             xm.pos_control([self.FINGER_PORT],[req.finger_pos], self.portHandler, self.packetHandler)
             time.sleep(.5)
         elif req.roller_duration != -1:
+            self.get_logger().info(f"rolling at vel {req.roller_vel} for {req.roller_duration}")
+
             assert -100 <= req.roller_vel <= 100, f"invalid roller velocity {req.roller_vel}" 
             xm.vel_control([self.ROLLER_PORT],[req.roller_vel], self.portHandler, self.packetHandler)
             time.sleep(req.roller_duration)
@@ -57,8 +62,8 @@ class RollerGripperService(Node):
             res.success = False
             return res
 
-        self.get_logger().info("got gripper request")
-        print(req)
+        self.get_logger().info("request done")
+
 
         res.success = True
         return res
