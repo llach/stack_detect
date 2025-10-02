@@ -191,14 +191,14 @@ def main(args=None):
         print(f"--- T{i} ---")
 
         # speed up all movements slightly except downwards to table
-        ts = adjust_ts(arr["ts"], offset = offsets[i], scaling=1 if i == 2 else .8)
+        ts = adjust_ts(arr["ts"], offset = offsets[i], scaling=1 if i == 2 else .65)
 
         ###### PRE ACTIONS
         if i == 0:
             node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=1650))
             node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=2950))
         elif i == 5:
-            node.finger2srv["right"].call_async(RollerGripper.Request(roller_vel=80, roller_duration=ts[-1]*0.95))
+            node.finger2srv["right"].call_async(RollerGripper.Request(roller_vel=-80, roller_duration=ts[-1]*0.95))
 
         ##### TRAJECTORY EXEC
         fut = node.execute_traj(move_groups[i], ts, arr["q"])
@@ -208,10 +208,10 @@ def main(args=None):
         
         ###### POST ACTIONS
         if i == 2:
-            node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(roller_vel=80, roller_duration=4.0))
+            node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(roller_vel=80, roller_duration=5.0))
             node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=3450))
         elif i == 5:
-            node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=900))
+            node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=850))
         elif i == 7:
             node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=1900))
             node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=2000))
