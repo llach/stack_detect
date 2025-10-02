@@ -22,6 +22,7 @@ class MoveArmService(Node):
     def srv_callback(self, request, response):
         self.controller_switcher.activate_controller(request.controller_name)
 
+        #### REQ CONTAINS JOINT TARGET
         if len(request.q_target) > 0:
             self.get_logger().info(f"executing q_target {request.q_target} ...")
             q_target = {jname: q for jname, q in zip(request.name_target, request.q_target)}
@@ -31,6 +32,7 @@ class MoveArmService(Node):
             response.success = True
             return response
 
+        ### REQ CONTAINS CARTESIAN POSE
         q_start = self.mh.current_q.copy()
         self.get_logger().info(f"q_start {q_start}")
         self.get_logger().info(f"{request.target_pose}")
