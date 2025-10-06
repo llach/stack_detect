@@ -44,7 +44,7 @@ class MoveArmService(Node):
         self.get_logger().info("doing IK ...")
         q_target = self.mh.moveit_IK(state=q_start, pose=request.target_pose, ik_link=request.ik_link)
         q_target = { jname: q_target[jname] for jname in request.name_target }
-        self.get_logger().info(f"q_target {q_target}")
+        # self.get_logger().info(f"q_target {q_target}")
 
         if q_target is None:
             self.get_logger().error("IK error!")

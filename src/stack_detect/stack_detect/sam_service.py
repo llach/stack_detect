@@ -191,7 +191,7 @@ class SAMGraspPointExtractor(Node):
 
         GOAL_ANGLE = 50 # in degrees
         OFFSET = [0.007,0,-0.015]
-        MAP_OFFSET = [0,-0.035,-0.005]
+        MAP_OFFSET = [0,-0.035,-0.009]
 
         self.wait_for_data()
 
@@ -206,8 +206,8 @@ class SAMGraspPointExtractor(Node):
         current_angle_offset = np.rad2deg(np.arccos(np.dot([0,1,0], Tmf[:3,:3]@[0,0,1]))) # angle between ground plane and z axis in wrist / finger frame
         print(current_angle_offset)
 
-        grasp_pose_finger_mat[:3,:3] = grasp_pose_finger_mat[:3,:3] @ R.from_euler("xyz", [0, -(GOAL_ANGLE - current_angle_offset), 0], degrees=True).as_matrix()
-        # Copy the rotated pose
+        grasp_pose_finger_mat[:3,:3] = grasp_pose_finger_mat[:3,:3] @ R.from_euler("xyz", [0, -(GOAL_ANGLE - current_angle_offset), -5], degrees=True).as_matrix()
+        # Copy the rotated pos
         grasp_pose_wrist_mat = grasp_pose_finger_mat.copy()
 
         # Apply translation in the rotated/local frame
