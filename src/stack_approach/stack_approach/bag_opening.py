@@ -212,10 +212,11 @@ def main(args=None):
             node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=3450))
         elif i == 5:
             node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=850))
-        elif i == 7:
-            node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=1900))
-            node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=2000))
+        # elif i == 7:
+        #     node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=1900))
+        #     node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=2000))
 
+        # if i == 0: break
     node.destroy_node()
     rclpy.shutdown()
 
