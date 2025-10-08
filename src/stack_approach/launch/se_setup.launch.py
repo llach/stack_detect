@@ -84,6 +84,14 @@ def generate_launch_description():
     nodes_to_start.append(
         Node(
             package='softenable_display',
+            executable='change_display',
+            name='change_display',
+            output='screen'
+        )
+    )
+    nodes_to_start.append(
+        Node(
+            package='softenable_display',
             executable='server',
             name='softenable_display_server',
             output='screen'
