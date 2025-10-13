@@ -1,5 +1,5 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable
+from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable, IncludeLaunchDescription
 from launch.substitutions import LaunchConfiguration, LaunchConfiguration
 
 from launch_ros.actions import Node
@@ -7,6 +7,29 @@ from launch_ros.actions import Node
 def generate_launch_description():
 
     nodes_to_start = []
+    # TODO NEED TO INCLUDE THE LAUNCH FILES FOR:
+    # Start the wrist camera
+    # LD_LIBRARY_PATH=/opt/conda/envs/softenable/lib/:$LD_LIBRARY_PATH ros2 launch realsense2_camera rs_launch.py config_file:=/home/ros/ws/src/iri_ur5e_description/config/l515.yaml
+
+    # # Start the camera for unfolding/YOLO
+    # LD_LIBRARY_PATH=/opt/conda/envs/softenable/lib/:$LD_LIBRARY_PATH ros2 launch realsense2_camera rs_launch.py config_file:=/home/ros/ws/src/iri_ur5e_description/config/d435.yaml camera_name:=unfolding_camera
+
+    # # Start the UR5 controllers
+    # ros2 launch iri_ur5e_description ur_dual.launch.py
+
+    # # Start the MoveIt package for the IK solver
+    # ros2 launch dual_ur5e_moveit move_group.launch.py
+
+    # # Start the set-up for the stack approach (including grippers)
+    # ros2 launch stack_approach se_setup.launch.py
+
+    # nodes_to_start.append(IncludeLaunchDescription(
+    #     PythonLaunchDescriptionSource(
+    #         [autoware_state_monitor_pkg_prefix, '/launch/autoware_state_monitor.launch.py']),
+    #     launch_arguments={}.items()
+    # )
+
+    ## Nodes
     nodes_to_start.append(
         Node(
             package='iri_ur5e_description',
