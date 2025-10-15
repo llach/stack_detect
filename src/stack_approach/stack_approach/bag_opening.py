@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import os
+import sys
 import glob
+import time
 import rclpy
 import numpy as np
 
@@ -8,6 +10,7 @@ from rclpy.node import Node
 from rclpy.action import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
 from control_msgs.action import FollowJointTrajectory
+from softenable_display_msgs.srv import SetDisplay
 from stack_msgs.srv import RollerGripper
 from stack_approach.motion_helper import MotionHelper
 from stack_approach.controller_switcher import ControllerSwitcher
@@ -21,6 +24,7 @@ move_groups = [
     "left",
     "right",
     "right",
+    "both",
     "both",
     "both",
 ]
@@ -74,6 +78,10 @@ class TrajectoryPublisher(Node):
         self.recbg = ReentrantCallbackGroup()
 
         self.controller_switcher = ControllerSwitcher()
+
+        self.cli_display = self.create_client(SetDisplay, '/set_display')
+        while not self.cli_display.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('Waiting for /set_display service...')
         
         self.group2client = {
             "both": ActionClient(
@@ -105,6 +113,7 @@ class TrajectoryPublisher(Node):
             print(f"waiting for {k.upper()} gripper srv")
             while not v.wait_for_service(timeout_sec=2.0):
                 self.get_logger().info('service not available, waiting again...')
+            print(f"found {k.upper()} gripper srv")
 
     def execute_traj(self, group, ts, qs):
         assert group in ["both", "left", "right"], f"unknown move group: {group}"
@@ -135,6 +144,74 @@ class TrajectoryPublisher(Node):
         fut = cli.call_async(req)
         rclpy.spin_until_future_complete(self, fut)
         return fut.result()
+    
+    def initial_pose(self):
+        fut = self.execute_traj(
+            "both", 
+            np.array([10]), 
+            np.array([
+                [ 1.39311028, -1.85827746, -2.0506866 , -0.98047812, -0.78614647, 0.45934969, -1.63986427, -0.50394781,  2.1300605 , -3.27673878, 0.80105019, -2.82983905]
+            ])
+        )
+        await_action_future(self, fut)
+
+    def retreat(self):
+        fut = self.execute_traj(
+            "both", 
+            np.array([
+                7,
+                10,
+                # 30
+            ]), 
+            np.array([
+                # np.deg2rad([        # start pose (offering)
+                #     74.16,
+                #     -112.87,
+                #     -94.81,
+                #     -33.03,
+                #     89.34,
+                #     -183.47,
+
+                #     -68.02,
+                #     -47.74,
+                #     62.89,
+                #     -324.02,
+                #     88.60,
+                #     32.82,
+                # ]),
+                np.deg2rad([        # intermediate
+                    94.97,
+                    -100.60,
+                    -106.19,
+                    -40.79,
+                    6.58,
+                    -79.47,
+
+                    -91.69,
+                    -38.37,
+                    89.48,
+                    -165.55,
+                    38.88,
+                    139.85,
+                ]),
+                np.deg2rad([        # unstacking start right / unfolding home left
+                    108.67,
+                    -92.52,
+                    -113.68,
+                    -45.90,
+                    -47.90,
+                    -11.00,
+
+                    -103.34,
+                    -60.51,
+                    122.96,
+                    -143.36,
+                    131.19,
+                    209.58,
+                ])
+            ])
+        )
+        await_action_future(self, fut)
 
 def load_trajectories(folder):
     files = glob.glob(os.path.join(folder, "t*.npz"))
@@ -156,7 +233,10 @@ def load_trajectories(folder):
     return arrays
 
 def await_action_future(node, fut):
-    rclpy.spin_until_future_complete(node, fut)
+    print("waiting for future ...")
+    while not fut.done() and rclpy.ok():
+        rclpy.spin_once(node, timeout_sec=0.1)
+    print("future done!")
 
     goal_handle = fut.result()
     if not goal_handle.accepted:
@@ -165,39 +245,56 @@ def await_action_future(node, fut):
 
     # now wait for result
     future_result = goal_handle.get_result_async()
-    rclpy.spin_until_future_complete(node, future_result)
+    print("waiting for future result ...")
+    while not future_result.done() and rclpy.ok():
+        rclpy.spin_once(node, timeout_sec=0.1)
+    print("future result done!")
     result = future_result.result()
     print(f"Trajectory finished with status: {result.status}")
 
     return True
 
-def main(args=None):
-    arrays = load_trajectories(f"/home/ros/ws/src/bag_opening/trajectories/")
+def execute_opening(node, arrays):
+    arrays.append({
+        "ts": np.array([2.5]),
+        "q": [
+            np.deg2rad([
+                74.16,
+                -112.87,
+                -94.81,
+                -33.03,
+                89.34,
+                -183.47,
+                -68.02,
+                -47.74,
+                62.89,
+                -324.02,
+                88.60,
+                32.82,
+            ])
+        ]
+    })
     
-    rclpy.init(args=args)
-    node = TrajectoryPublisher()
- 
-    # Spin once or twice to allow action clients to connect
-    for _ in range(5):
-        rclpy.spin_once(node, timeout_sec=0.1)
-
     offsets = [0 for _ in range(len(arrays))]
     offsets[0] = 10
+    offsets[-1] = 2.5
 
     # offsets[2] = 10
     # offsets[4] = 10
 
+    node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=1650))
+    node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=2950))
+
     for i, arr in enumerate(arrays):
+        if i == 0: continue
+
         print(f"--- T{i} ---")
 
         # speed up all movements slightly except downwards to table
-        ts = adjust_ts(arr["ts"], offset = offsets[i], scaling=1 if i == 2 else .65)
+        ts = adjust_ts(arr["ts"], offset = offsets[i], scaling=.7 if i == 2 else .7)
 
         ###### PRE ACTIONS
-        if i == 0:
-            node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=1650))
-            node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=2950))
-        elif i == 5:
+        if i == 5:
             node.finger2srv["right"].call_async(RollerGripper.Request(roller_vel=-80, roller_duration=ts[-1]*0.95))
 
         ##### TRAJECTORY EXEC
@@ -212,11 +309,36 @@ def main(args=None):
             node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=3450))
         elif i == 5:
             node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=850))
-        # elif i == 7:
-        #     node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=1900))
-        #     node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=2000))
 
-        # if i == 0: break
+def main(args=None):
+    arrays = load_trajectories(f"/home/ros/ws/src/bag_opening/trajectories/")
+    # arrays = load_trajectories(f"{os.environ['HOME']}/projects/se_clinic_case/ros_modules/bag_opening/trajectories/")
+
+    rclpy.init(args=args)
+    node = TrajectoryPublisher()
+    
+    last_arg = sys.argv[-1]
+
+    if last_arg == "initial":
+        print("going to intial pose ...")
+        node.cli_display.call_async(SetDisplay.Request(name="protocol_1", use_tts=False))
+        node.initial_pose()
+    elif last_arg == "retreat":
+        print("going to retreat pose ...")
+        node.cli_display.call_async(SetDisplay.Request(name="protocol_2"))
+        node.retreat()
+    elif last_arg == "slides":
+        print("executing with slides ...")
+        node.cli_display.call_async(SetDisplay.Request(name="protocol_1"))
+        time.sleep(10)
+        node.cli_display.call_async(SetDisplay.Request(name="protocol_bag_1"))
+
+        execute_opening(node, arrays)
+        node.cli_display.call_async(SetDisplay.Request(name="protocol_bag_2"))
+    else:
+        print("opening bag ...")
+        execute_opening(node, arrays)
+    
     node.destroy_node()
     rclpy.shutdown()
 
