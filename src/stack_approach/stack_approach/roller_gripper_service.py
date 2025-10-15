@@ -48,7 +48,7 @@ class RollerGripperService(Node):
                 assert 700 <= req.finger_pos <= 2500, f"invalid finger position {req.finger_pos}"
             elif self.FINGER_PORT == NORMAL_FINGER_PORT:
                 assert 2000 <= req.finger_pos <= 3500, f"invalid finger position {req.finger_pos}"
-            xm.pos_control([self.FINGER_PORT],[req.finger_pos], self.portHandler, self.packetHandler)
+            xm.current_pos([self.FINGER_PORT], [1000], [req.finger_pos], self.portHandler, self.packetHandler)
             time.sleep(.5)
         elif req.roller_duration != -1:
             self.get_logger().info(f"rolling at vel {req.roller_vel} for {req.roller_duration}")

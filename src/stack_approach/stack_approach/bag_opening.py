@@ -24,6 +24,7 @@ move_groups = [
     "right",
     "both",
     "both",
+    "both",
 ]
 
 group2joints = {
@@ -183,13 +184,30 @@ def await_action_future(node, fut):
     return True
 
 def execute_opening(node, arrays):
-
-    # Spin once or twice to allow action clients to connect
-    for _ in range(5):
-        rclpy.spin_once(node, timeout_sec=0.1)
+    arrays.append({
+        "ts": np.array([2.5]),
+        "q": [
+            np.deg2rad([
+                74.16,
+                -112.87,
+                -94.81,
+                -33.03,
+                89.34,
+                -183.47,
+                -68.02,
+                -47.74,
+                62.89,
+                -324.02,
+                88.60,
+                32.82,
+            ])
+        ]
+    })
+    
 
     offsets = [0 for _ in range(len(arrays))]
     offsets[0] = 10
+    offsets[-1] = 2.5
 
     # offsets[2] = 10
     # offsets[4] = 10
@@ -203,7 +221,7 @@ def execute_opening(node, arrays):
         print(f"--- T{i} ---")
 
         # speed up all movements slightly except downwards to table
-        ts = adjust_ts(arr["ts"], offset = offsets[i], scaling=1 if i == 2 else .65)
+        ts = adjust_ts(arr["ts"], offset = offsets[i], scaling=.7 if i == 2 else .6)
 
         ###### PRE ACTIONS
         if i == 5:
