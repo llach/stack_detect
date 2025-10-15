@@ -310,6 +310,27 @@ def execute_opening(node, arrays):
         elif i == 5:
             node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=850))
 
+def calib(node, arrays):
+    # print("going to initial pose ...")
+    fut = node.execute_traj("both", [7], arrays[0]["q"])
+    await_action_future(node, fut)
+
+    fut = node.execute_traj("both", adjust_ts(arrays[1]["ts"], scaling=0.5), arrays[1]["q"])
+    await_action_future(node, fut)
+
+    while True:
+        fut = node.execute_traj("left", adjust_ts(arrays[2]["ts"], scaling=1.3), arrays[2]["q"])
+        await_action_future(node, fut)
+
+        time.sleep(1)
+
+        fut = node.execute_traj("left", [2], [arrays[2]["q"][0]])
+        await_action_future(node, fut)
+
+        if input("continue?").lower() == "q":
+            print("bye!")
+            break
+
 def main(args=None):
     arrays = load_trajectories(f"/home/ros/ws/src/bag_opening/trajectories/")
     # arrays = load_trajectories(f"{os.environ['HOME']}/projects/se_clinic_case/ros_modules/bag_opening/trajectories/")
@@ -327,6 +348,9 @@ def main(args=None):
         print("going to retreat pose ...")
         node.cli_display.call_async(SetDisplay.Request(name="protocol_2"))
         node.retreat()
+    elif last_arg == "calib":
+        print("doing bag calib")
+        calib(node, arrays)
     elif last_arg == "slides":
         print("executing with slides ...")
         node.cli_display.call_async(SetDisplay.Request(name="protocol_1"))
