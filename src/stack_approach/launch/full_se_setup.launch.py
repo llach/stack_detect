@@ -1,7 +1,7 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, SetEnvironmentVariable, IncludeLaunchDescription
-from launch.substitutions import LaunchConfiguration, LaunchConfiguration
-
+from launch.substitutions import LaunchConfiguration, FindPackageShare
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 
 def generate_launch_description():
@@ -23,11 +23,31 @@ def generate_launch_description():
     # # Start the set-up for the stack approach (including grippers)
     # ros2 launch stack_approach se_setup.launch.py
 
-    # nodes_to_start.append(IncludeLaunchDescription(
-    #     PythonLaunchDescriptionSource(
-    #         [autoware_state_monitor_pkg_prefix, '/launch/autoware_state_monitor.launch.py']),
-    #     launch_arguments={}.items()
-    # )
+    realsense2_camera_ros = FindPackageShare(package='realsense2_camera').find('realsense2_camera')  
+    iri_ur5_description_ros = FindPackageShare(package='iri_ur5e_description').find('iri_ur5e_description')  
+    dual_ur5e_moveit = FindPackageShare(package='dual_ur5e_moveit').find('dual_ur5e_moveit') 
+    stack_approach = FindPackageShare(package='stack_approach').find('stack_approach') 
+
+    # Cameras
+    nodes_to_start.append(IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([realsense2_camera_ros, '/launch/rs_launch.py']),
+        launch_arguments={'config_file': "/home/ros/ws/src/iri_ur5e_description/config/l515.yaml"
+                          }.items()))
+    nodes_to_start.append(IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([realsense2_camera_ros, '/launch/rs_launch.py']),
+        launch_arguments={'config_file': "/home/ros/ws/src/iri_ur5e_description/config/d435.yaml",
+                          'camera_name': 'unfolding_camera'
+                          }.items()))
+    # UR5e control
+    nodes_to_start.append(IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([iri_ur5_description_ros, '/launch/ur_dual.py'])))
+    # Moveit 
+    nodes_to_start.append(IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([dual_ur5e_moveit, '/launch/move_group.py'])))
+    # Stack approach setup
+    nodes_to_start.append(IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([stack_approach, '/launch/se_setup.py'])))
+    
 
     ## Nodes
     nodes_to_start.append(
