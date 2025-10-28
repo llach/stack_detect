@@ -39,12 +39,12 @@ def get_bag_pose_from_array(img_array, point_offset=0.15, show_debug=False):
     box = box.astype(int)
     (cx, cy), (w, h), angle = rect
 
-    if w < h:
-        rot_angle = angle
-    else:
-        rot_angle = angle + 90
+    # if w < h:
+    #     rot_angle = angle
+    # else:
+    #     rot_angle = angle + 90
 
-    angle_to_vertical = (90 + rot_angle) % 180
+    # angle_to_vertical = (90 + rot_angle) % 180
 
     rect_pts = np.array(cv2.boxPoints(rect))
     rect_pts = rect_pts[np.lexsort((rect_pts[:, 1], rect_pts[:, 0]))]
@@ -65,12 +65,12 @@ def get_bag_pose_from_array(img_array, point_offset=0.15, show_debug=False):
         vis = img_array.copy()
         cv2.drawContours(vis, [box], 0, (0, 0, 255), 2)
         cv2.circle(vis, offset_point, 6, (0, 255, 255), -1)
-        cv2.putText(vis, f"{angle_to_vertical:.2f} deg", (10, 30),
+        cv2.putText(vis, f"{angle:.2f} deg", (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
         cv2.imshow("Pose Debug", vis)
         cv2.waitKey(1)
 
-    return angle_to_vertical, box, offset_point
+    return angle, box, offset_point, top_contour
 
 
 
