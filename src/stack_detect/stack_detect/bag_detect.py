@@ -71,7 +71,7 @@ class BagDetectNode(Node):
         self.latest_rgb = None
         self.latest_depth = None
         self.K = None  # camera intrinsics
-        self.dino = DINOModel(cpu_only=True, prefix=f"{os.environ['HOME']}/repos/ckp/")
+        self.dino = DINOModel(cpu_only=True, prefix=f"/home/ros/pretrained/dino/")
 
         self.get_logger().info("✅ DINO model loaded and node initialized")
 
@@ -80,13 +80,13 @@ class BagDetectNode(Node):
     # -----------------------------------------------------------
     def rgb_cb(self, msg: CompressedImage):
         try:
-            self.latest_rgb = self.bridge.compressed_imgmsg_to_cv2(msg, "bgr8")
+            self.latest_rgb = msg
         except Exception as e:
             self.get_logger().error(f"RGB decode failed: {e}")
 
     def depth_cb(self, msg: ImageMSG):
         try:
-            self.latest_depth = self.bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
+            self.latest_depth = msg
         except Exception as e:
             self.get_logger().error(f"Depth decode failed: {e}")
 
@@ -135,7 +135,7 @@ class BagDetectNode(Node):
             return response
 
         try:
-            image_cv = self.latest_rgb
+            image_cv = self.bridge.compressed_imgmsg_to_cv2(self.latest_rgb)
             image_pil = Image.fromarray(cv2.cvtColor(image_cv, cv2.COLOR_BGR2RGB))
             boxes, labels, confidences = self.dino.predict(image_pil, "bag")
 
@@ -150,16 +150,20 @@ class BagDetectNode(Node):
             cropped_cv = image_cv[y0:y1, x0:x1]
 
             # --- Pose estimation ---
-            angle, box, offset_point = get_bag_pose_from_array(cropped_cv, point_offset=0.08)
+            angle, box, offset_point = get_bag_pose_from_array(cropped_cv, point_offset=0.15)
             box_global = box + np.array([x0, y0])
             offset_global = (offset_point[0] + x0, offset_point[1] + y0)
 
             # --- 2D → 3D conversion ---
-            point_3d = self.pixel_to_3d(offset_global, self.latest_depth, self.K)
+            point_3d = self.pixel_to_3d(
+                offset_global, 
+                self.bridge.imgmsg_to_cv2(self.latest_depth), 
+                self.K
+            )
 
             # --- Draw result ---
             vis = image_cv.copy()
-            cv2.drawContours(vis, [np.int0(box_global)], 0, (0, 0, 255), 2)
+            cv2.drawContours(vis, [box_global.astype(int)], 0, (0, 0, 255), 2)
             cv2.circle(vis, offset_global, 6, (0, 255, 255), -1)
             cv2.putText(vis, f"{angle:.2f}°", (int(offset_global[0]) + 10, int(offset_global[1])),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)

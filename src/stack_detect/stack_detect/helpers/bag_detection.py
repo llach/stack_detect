@@ -56,7 +56,9 @@ def get_bag_pose_from_array(img_array, point_offset=0.15, show_debug=False):
     top_right, bottom_right = right_pts
     width_vec = top_right - top_left
     height_vec = bottom_left - top_left
-    offset_point = top_left + point_offset * width_vec + 0.5 * height_vec
+
+
+    offset_point = top_left + 0.5 * width_vec + point_offset * height_vec
     offset_point = tuple(map(int, offset_point))
 
     if show_debug:
