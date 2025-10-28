@@ -9,11 +9,16 @@ import rclpy
 from rclpy.node import Node
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.qos import QoSProfile
+from rclpy.duration import Duration
 
 from cv_bridge import CvBridge
 from sensor_msgs.msg import Image as ImageMSG, CompressedImage, CameraInfo
 from geometry_msgs.msg import PoseStamped
 from std_srvs.srv import Trigger
+
+import tf2_ros
+from tf2_ros import TransformException
+from tf2_geometry_msgs import do_transform_pose
 
 # --- helpers ---
 from stack_detect.helpers.dino_model import DINOModel
@@ -67,6 +72,10 @@ class BagDetectNode(Node):
             Trigger, "detect_bag", self.trigger_cb, callback_group=self.cbg
         )
 
+        # --- TF listener ---
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
+
         # --- State ---
         self.latest_rgb = None
         self.latest_depth = None
@@ -91,16 +100,13 @@ class BagDetectNode(Node):
             self.get_logger().error(f"Depth decode failed: {e}")
 
     def info_cb(self, msg: CameraInfo):
-        # Extract intrinsic matrix (3x3)
         self.K = np.array(msg.k, dtype=np.float32).reshape(3, 3)
 
     # -----------------------------------------------------------
     # --- 2D→3D conversion helper -------------------------------
     # -----------------------------------------------------------
     def pixel_to_3d(self, pixel, depth_img, K):
-        """
-        Convert a 2D pixel (u,v) + depth image + intrinsics to 3D coordinates (in meters)
-        """
+        """Convert 2D pixel (u,v) + depth image + intrinsics to 3D camera coordinates."""
         u, v = int(pixel[0]), int(pixel[1])
         if depth_img is None or K is None:
             raise RuntimeError("Missing depth or camera intrinsics")
@@ -109,14 +115,33 @@ class BagDetectNode(Node):
             v < 0 or v >= depth_img.shape[0]
             or u < 0 or u >= depth_img.shape[1]
         ):
-            raise RuntimeError(f"Pixel {pixel} out of image bounds {depth_img.shape[::-1]}")
+            raise RuntimeError(f"Pixel {pixel} out of bounds {depth_img.shape[::-1]}")
 
         line_dist = depth_img[v, u] / 1000.0  # mm → m
         point_3d = pixel_to_point(pixel, line_dist, K)
         return point_3d
 
     # -----------------------------------------------------------
-    # --- Service trigger ---------------------------------------
+    # --- Transform pose to map frame ---------------------------
+    # -----------------------------------------------------------
+    def get_bag_pose_in_map(self, pose_cam_frame: PoseStamped) -> PoseStamped:
+        """Transform PoseStamped from camera_link to map frame."""
+        try:
+            transform = self.tf_buffer.lookup_transform(
+                target_frame="map",
+                source_frame=pose_cam_frame.header.frame_id,
+                time=rclpy.time.Time(),
+                timeout=Duration(seconds=1.0),
+            )
+            pose_map = do_transform_pose(pose_cam_frame, transform)
+            pose_map.header.frame_id = "map"
+            return pose_map
+        except TransformException as ex:
+            self.get_logger().warn(f"TF transform failed: {ex}")
+            return None
+
+    # -----------------------------------------------------------
+    # --- Trigger Service: main pipeline ------------------------
     # -----------------------------------------------------------
     def trigger_cb(self, request, response):
         if self.latest_rgb is None:
@@ -135,33 +160,32 @@ class BagDetectNode(Node):
             return response
 
         try:
+            # --- Decode latest images ---
             image_cv = self.bridge.compressed_imgmsg_to_cv2(self.latest_rgb)
+            depth_cv = self.bridge.imgmsg_to_cv2(self.latest_depth, desired_encoding="passthrough")
             image_pil = Image.fromarray(cv2.cvtColor(image_cv, cv2.COLOR_BGR2RGB))
-            boxes, labels, confidences = self.dino.predict(image_pil, "bag")
 
+            # --- DINO detection ---
+            boxes, labels, confidences = self.dino.predict(image_pil, "bag")
             if len(boxes) == 0:
                 response.success = False
                 response.message = "No bag detected."
                 return response
 
-            # --- Crop ---
+            # --- Crop around best detection ---
             best_box = expand_bounding_box(boxes[0], image_pil.width, image_pil.height, scale=1.15)
             x0, y0, x1, y1 = best_box
             cropped_cv = image_cv[y0:y1, x0:x1]
 
-            # --- Pose estimation ---
+            # --- Get bag orientation & offset point ---
             angle, box, offset_point = get_bag_pose_from_array(cropped_cv, point_offset=0.15)
             box_global = box + np.array([x0, y0])
             offset_global = (offset_point[0] + x0, offset_point[1] + y0)
 
-            # --- 2D → 3D conversion ---
-            point_3d = self.pixel_to_3d(
-                offset_global, 
-                self.bridge.imgmsg_to_cv2(self.latest_depth), 
-                self.K
-            )
+            # --- Convert offset pixel → 3D point ---
+            point_3d = self.pixel_to_3d(offset_global, depth_cv, self.K)
 
-            # --- Draw result ---
+            # --- Draw visualization ---
             vis = image_cv.copy()
             cv2.drawContours(vis, [box_global.astype(int)], 0, (0, 0, 255), 2)
             cv2.circle(vis, offset_global, 6, (0, 255, 255), -1)
@@ -172,20 +196,31 @@ class BagDetectNode(Node):
             img_msg = self.bridge.cv2_to_compressed_imgmsg(vis)
             self.img_pub.publish(img_msg)
 
-            # --- Publish 3D pose ---
-            pose_msg = PoseStamped()
-            pose_msg.header.stamp = self.get_clock().now().to_msg()
-            pose_msg.header.frame_id = "camera_link"
-            pose_msg.pose.position.x = float(point_3d[0])
-            pose_msg.pose.position.y = float(point_3d[1])
-            pose_msg.pose.position.z = float(point_3d[2])
-            pose_msg.pose.orientation.w = 1.0
-            self.bag_pose_pub.publish(pose_msg)
+            # --- Compose pose in camera_link ---
+            pose_cam = PoseStamped()
+            pose_cam.header.stamp = self.get_clock().now().to_msg()
+            pose_cam.header.frame_id = "camera_link"
+            pose_cam.pose.position.x = float(point_3d[0])
+            pose_cam.pose.position.y = float(point_3d[1])
+            pose_cam.pose.position.z = float(point_3d[2])
+            pose_cam.pose.orientation.w = 1.0
 
-            response.success = True
-            response.message = (
-                f"Bag detected. Angle={angle:.2f}°, Pose=({point_3d[0]:.3f}, {point_3d[1]:.3f}, {point_3d[2]:.3f})"
-            )
+            # --- Transform to map frame ---
+            pose_map = self.get_bag_pose_in_map(pose_cam)
+            if pose_map:
+                self.bag_pose_pub.publish(pose_map)
+                response.success = True
+                response.message = (
+                    f"Bag detected. Angle={angle:.2f}°, MapPose=({pose_map.pose.position.x:.3f}, "
+                    f"{pose_map.pose.position.y:.3f}, {pose_map.pose.position.z:.3f})"
+                )
+            else:
+                response.success = True
+                response.message = (
+                    f"Bag detected in camera frame only. Angle={angle:.2f}°, "
+                    f"CameraPose=({point_3d[0]:.3f}, {point_3d[1]:.3f}, {point_3d[2]:.3f})"
+                )
+
             self.get_logger().info(response.message)
 
         except Exception as e:
