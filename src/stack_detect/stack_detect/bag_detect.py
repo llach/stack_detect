@@ -25,7 +25,7 @@ from stack_detect.helpers.dino_model import DINOModel
 from stack_detect.helpers.bag_detection import expand_bounding_box, get_bag_pose_from_array
 from stack_approach.helpers import pixel_to_point
 
-from tf_transformations import quaternion_from_euler
+from tf_transformations import quaternion_from_euler, quaternion_multiply
 from geometry_msgs.msg import Quaternion
 
 def rpy_to_quat(roll, pitch, yaw):
@@ -73,6 +73,9 @@ class BagDetectNode(Node):
         )
         self.bag_pose_pub = self.create_publisher(
             PoseStamped, "/bag_pose", 10, callback_group=self.cbg
+        )
+        self.wrist_pose_pub = self.create_publisher(
+            PoseStamped, "/bag_wrist_pose", 10, callback_group=self.cbg
         )
 
         # --- TF listener ---
@@ -167,6 +170,34 @@ class BagDetectNode(Node):
         except TransformException as ex:
             self.get_logger().warn(f"TF transform failed: {ex}")
             return None     
+
+    def get_left_wrist_pose(self, angle_deg: float) -> PoseStamped:
+        """Return PoseStamped of left wrist rotated around its local Z axis by `angle_deg`."""
+        # --- Base pose (map frame) ---
+        base_pos = np.array([0.468, -0.288, 0.940])
+        base_quat = np.array([-0.619, 0.785, 0.009, -0.007])  # (x, y, z, w)
+
+        # --- Rotation around local Z (in that frame) ---
+        rot_local_z = quaternion_from_euler(0.0, 0.0, np.deg2rad(angle_deg))  # rotation about Z
+
+        # Multiply quaternions: new_q = base_q * local_z_rot
+        # (order matters: local rotation applied in local frame)
+        new_quat = quaternion_multiply(base_quat, rot_local_z)
+
+        # --- Compose PoseStamped ---
+        pose = PoseStamped()
+        pose.header.frame_id = "map"
+        pose.header.stamp = self.get_clock().now().to_msg()
+
+        pose.pose.position.x = base_pos[0]
+        pose.pose.position.y = base_pos[1]
+        pose.pose.position.z = base_pos[2]
+        pose.pose.orientation.x = new_quat[0]
+        pose.pose.orientation.y = new_quat[1]
+        pose.pose.orientation.z = new_quat[2]
+        pose.pose.orientation.w = new_quat[3]
+
+        return pose
 
     # -----------------------------------------------------------
     # --- Trigger Service: main pipeline ------------------------
@@ -264,8 +295,10 @@ class BagDetectNode(Node):
             response.message = "tf error"
 
         pose_map.pose.orientation = rpy_to_quat(0,0,np.deg2rad(-angle))
-
         self.bag_pose_pub.publish(pose_map)
+
+        wrist_pose = self.get_left_wrist_pose(angle)
+        self.wrist_pose_pub.publish(wrist_pose)
 
         response.success = True
         response.message = (
