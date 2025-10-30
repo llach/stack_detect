@@ -28,7 +28,7 @@ def get_bag_pose_from_array(
     show_debug=False,
     gauss_size=7,
     canny_thresh=(50, 150),
-    closing_kernel_size=5
+    closing_kernel_size=30
 ):
     gray = cv2.cvtColor(img_array, cv2.COLOR_BGR2GRAY)
 
