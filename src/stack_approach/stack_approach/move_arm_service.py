@@ -26,7 +26,7 @@ class MoveArmService(Node):
         if len(request.q_target) > 0:
             self.get_logger().info(f"executing q_target {request.q_target} ...")
             q_target = {jname: q for jname, q in zip(request.name_target, request.q_target)}
-            self.mh.send_traj(q_target, request.execution_time, blocking=request.blocking)
+            self.mh.send_traj(q_target, request.execution_time, blocking=request.blocking, ik_link=request.ik_link)
             if request.blocking: time.sleep(0.5)
             self.get_logger().info("done")
             response.success = True
@@ -34,8 +34,9 @@ class MoveArmService(Node):
 
         ### REQ CONTAINS CARTESIAN POSE
         q_start = self.mh.current_q.copy()
+        q_start = { jname: q_start[jname] for jname in request.name_target }
         self.get_logger().info(f"q_start {q_start}")
-        self.get_logger().info(f"{request.target_pose}")
+        # self.get_logger().info(f"{request.target_pose}")
         if q_start is None:
             self.get_logger().error("No joint states yet!")
             response.success = False
@@ -44,7 +45,7 @@ class MoveArmService(Node):
         self.get_logger().info("doing IK ...")
         q_target = self.mh.moveit_IK(state=q_start, pose=request.target_pose, ik_link=request.ik_link)
         q_target = { jname: q_target[jname] for jname in request.name_target }
-        # self.get_logger().info(f"q_target {q_target}")
+        self.get_logger().info(f"q_target {q_target}")
 
         if q_target is None:
             self.get_logger().error("IK error!")
@@ -54,7 +55,7 @@ class MoveArmService(Node):
         
         if request.execute:
             self.get_logger().info("executing trajectory ...")
-            self.mh.send_traj(q_target, request.execution_time, blocking=request.blocking)
+            self.mh.send_traj(q_target, request.execution_time, blocking=request.blocking, ik_link=request.ik_link)
             if request.blocking: time.sleep(0.5)
             self.get_logger().info("done")
         else:

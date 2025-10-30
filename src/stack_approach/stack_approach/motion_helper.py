@@ -49,6 +49,13 @@ class MotionHelper:
             callback_group=self.recbg
         )
 
+        self.left_traj_client = ActionClient(
+            self.n, 
+            FollowJointTrajectory, 
+            f"/left_arm_joint_trajectory_controller/follow_joint_trajectory",
+            callback_group=self.recbg
+        )
+
         self.log.info("waiting for trajectory action server ...")
         self.traj_client.wait_for_server()
         self.log.info("found action server!")
@@ -80,14 +87,14 @@ class MotionHelper:
         for i in range(ntries):
             self.n.get_logger().info(f"IK try {i}")
             ik_req = GetPositionIK.Request()
-            ik_req.ik_request.group_name = "right_arm"
+            ik_req.ik_request.group_name = "left_arm" if "left" in ik_link else "right_arm" 
             ik_req.ik_request.robot_state.joint_state.name = list(state.keys())
             ik_req.ik_request.robot_state.joint_state.position = list(state.values())
             ik_req.ik_request.ik_link_name = ik_link
             ik_req.ik_request.pose_stamped = pose
 
             res = self.ik_client.call(ik_req)
-            self.log.info(f"{res}")
+            # self.log.info(f"{res}")
 
             if res.error_code.val != 1:
                 # print(f"moveit error {res.error_code}")
@@ -103,13 +110,15 @@ class MotionHelper:
     def js_callback(self, msg):
         self.current_q = {jname: q for jname, q in zip(msg.name, msg.position)}
 
-    def send_traj(self, qfinal, t, blocking=True):
+    def send_traj(self, qfinal, t, blocking=True, ik_link="wrist_3_link"):
         print("sending goal")
         traj = self.create_traj(qfinal, t)
+
+        tc = self.left_traj_client if "left" in ik_link else self.traj_client
         if blocking: 
-            return self.traj_client.send_goal(traj)
+            return tc.send_goal(traj)
         else:
-            return self.traj_client.send_goal_async(traj)
+            return tc.send_goal_async(traj)
 
     def create_traj(self, qfinal, time):
         traj_goal = FollowJointTrajectory.Goal()

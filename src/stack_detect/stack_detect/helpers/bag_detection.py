@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-
+from datetime import datetime
 
 # ---------------------------------------------------------------
 # --- Utility functions -----------------------------------------
@@ -25,7 +25,6 @@ def expand_bounding_box(box, image_width, image_height, scale=1.1):
 def get_bag_pose_from_array(
     img_array,
     point_offset=0.15,
-    show_debug=False,
     gauss_size=7,
     canny_thresh=(50, 150),
     closing_kernel_size=30
@@ -70,22 +69,22 @@ def get_bag_pose_from_array(
     offset_point = tuple(map(int, offset_point))
 
     # --- Build debug visualization (if enabled) ---
-    vis = np.array([])
-    if show_debug:
-        vis_tl = cv2.cvtColor(blur, cv2.COLOR_GRAY2BGR)
-        vis_tr = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
-        vis_bl = cv2.cvtColor(closed, cv2.COLOR_GRAY2BGR)
-        vis_br = img_array.copy()
-        cv2.drawContours(vis_br, [top_contour], -1, (0, 0, 255), 2)
-        cv2.drawContours(vis_br, [box], 0, (255, 255, 0), 1)
-        cv2.circle(vis_br, offset_point, 6, (0, 255, 255), -1)
-        cv2.putText(vis_br, f"{angle:.2f} deg", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+    vis_tl = cv2.cvtColor(blur, cv2.COLOR_GRAY2BGR)
+    vis_tr = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
+    vis_bl = cv2.cvtColor(closed, cv2.COLOR_GRAY2BGR)
+    vis_br = img_array.copy()
+    cv2.drawContours(vis_br, [top_contour], -1, (0, 0, 255), 2)
+    cv2.drawContours(vis_br, [box], 0, (255, 255, 0), 1)
+    cv2.circle(vis_br, offset_point, 6, (0, 255, 255), -1)
+    cv2.putText(vis_br, f"{angle:.2f} deg", (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
-        top_row = np.hstack([vis_tl, vis_tr])
-        bottom_row = np.hstack([vis_bl, vis_br])
-        vis = np.vstack([top_row, bottom_row])
+    top_row = np.hstack([vis_tl, vis_tr])
+    bottom_row = np.hstack([vis_bl, vis_br])
+    vis = np.vstack([top_row, bottom_row])
 
+    cv2.putText(vis, datetime.now().strftime('%H:%M:%S.%f')[:-3], (5, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+    
     return angle, box, offset_point, top_contour, vis
 
 

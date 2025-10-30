@@ -1,4 +1,5 @@
 bool store_data
+geometry_msgs/Point offset
 ---
 bool success
 geometry_msgs/PoseStamped target_pose

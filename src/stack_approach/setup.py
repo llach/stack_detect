@@ -35,6 +35,7 @@ setup(
             'blue_gripper = stack_approach.blue_gripper_service:main',
             'roller_gripper = stack_approach.roller_gripper_service:main',
             'bag_opening = stack_approach.bag_opening:main',
+            'bag_opening_perc = stack_approach.bag_opening_perc:main',
         ],
     },
 )

@@ -27,7 +27,7 @@ setup(
             'sam_gpe = stack_detect.sam_gpe:main',
             'sam_service = stack_detect.sam_service:main',
             'collect_classify = stack_detect.collect_classify:main',
-            'bag_detect = stack_detect.bag_detect:main',
+            'bag_detect_dino = stack_detect.bag_detect_dino:main',
         ],
     },
 )
