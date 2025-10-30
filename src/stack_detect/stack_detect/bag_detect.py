@@ -236,7 +236,7 @@ class BagDetectNode(Node):
         cropped_cv = image_cv[y0:y1, x0:x1]
 
         # --- Get bag orientation & offset point ---
-        angle, box, offset_point, contour = get_bag_pose_from_array(cropped_cv, point_offset=0.15)
+        angle, box, offset_point, contour, dbg_image = get_bag_pose_from_array(cropped_cv, point_offset=0.15)
         box_global = box + np.array([x0, y0])
         offset_global = (offset_point[0] + x0, offset_point[1] + y0)
 
