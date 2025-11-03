@@ -382,9 +382,18 @@ def main(args=None):
     
     last_arg = sys.argv[-1]
 
+    if "bag_opening_perc" in last_arg: # with "in", we catch execution with python and ros2 run
+        execute_opening(node, arrays)
+    elif last_arg == "slides":
+        print("executing with slides ...")
+        node.cli_display.call_async(SetDisplay.Request(name="protocol_1"))
+        time.sleep(10)
+        node.cli_display.call_async(SetDisplay.Request(name="protocol_bag_1"))
 
-    execute_opening(node, arrays)
-    
+        execute_opening(node, arrays)
+        node.cli_display.call_async(SetDisplay.Request(name="protocol_bag_2"))
+
+
     node.destroy_node()
     rclpy.shutdown()
 
