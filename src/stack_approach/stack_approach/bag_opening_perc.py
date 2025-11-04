@@ -383,6 +383,7 @@ def main(args=None):
     last_arg = sys.argv[-1]
 
     if "bag_opening_perc" in last_arg: # with "in", we catch execution with python and ros2 run
+        print("executing normally ...")
         execute_opening(node, arrays)
     elif last_arg == "slides":
         print("executing with slides ...")
