@@ -241,7 +241,7 @@ def move_over_bag(node, left_wrist_pose):
 
 def execute_opening(node, trajs):
 
-    PRE_GRASP_HEIGHT = 0.835
+    PRE_GRASP_HEIGHT = 0.837
     GRASP_HEIGHT = 0.7905
 
     node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=1650))
@@ -253,7 +253,7 @@ def execute_opening(node, trajs):
         fut = node.bag_cli.call_async(StackDetect.Request(
                 offset = Point(
                     x=0.035, 
-                    y=-0.025, 
+                    y=-0.02, 
                     z=PRE_GRASP_HEIGHT
                 )
             )
