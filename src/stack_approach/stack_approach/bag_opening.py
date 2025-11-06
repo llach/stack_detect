@@ -169,7 +169,7 @@ class TrajectoryPublisher(Node):
     def initial_pose(self):
         fut = self.execute_traj(
             "both", 
-            np.array([5]), 
+            np.array([3]), 
             np.array([
                 [ 1.39311028, -1.85827746, -2.0506866 , -0.98047812, -0.78614647, 0.45934969, -1.63986427, -0.50394781,  2.1300605 , -3.27673878, 0.80105019, -2.82983905] # old  start (cam facing front)
             ])
@@ -179,7 +179,7 @@ class TrajectoryPublisher(Node):
     def initial_pose_new(self):
         fut = self.execute_traj(
             "both", 
-            np.array([5]), 
+            np.array([3]), 
             np.array([
                 [  1.39311028, -1.85827746, -2.0506866 , -0.98047812, -0.78614647, 0.45934969, -1.44216556, -0.68469267,  2.24536608, -3.02081587,  0.7967428 , -1.56835287 ] # bag in camera view
             ])
@@ -190,8 +190,8 @@ class TrajectoryPublisher(Node):
         fut = self.execute_traj(
             "both", 
             np.array([
-                7,
-                10,
+                2,
+                3,
                 # 30
             ]), 
             np.array([
@@ -377,11 +377,11 @@ def main(args=None):
         node.initial_pose()
     elif last_arg == "initial_new":
         print("going to initial_new pose ...")
-        node.cli_display.call_async(SetDisplay.Request(name="protocol_1", use_tts=False))
+        # node.cli_display.call_async(SetDisplay.Request(name="protocol_1", use_tts=False))
         node.initial_pose_new()
     elif last_arg == "retreat":
         print("going to retreat pose ...")
-        node.cli_display.call_async(SetDisplay.Request(name="protocol_2"))
+        # node.cli_display.call_async(SetDisplay.Request(name="protocol_2"))
         node.retreat()
     elif last_arg == "calib":
         print("doing bag calib")

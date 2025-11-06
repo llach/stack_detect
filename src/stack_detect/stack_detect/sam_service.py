@@ -135,6 +135,13 @@ class SAMGraspPointExtractor(Node):
             exit(0)
 
     def extract_grasp_point(self, req, res): 
+        while True:
+            res = self.get_sam_thing(res)
+            if input("###################\n#######################\ngood?").strip().lower() == "y": break
+        self.get_logger().info("SAM service done!")
+        return res
+    
+    def get_sam_thing(self, res):
         self.wait_for_data()
         
         ##### Convert image
@@ -191,7 +198,7 @@ class SAMGraspPointExtractor(Node):
 
         GOAL_ANGLE = 50 # in degrees
         OFFSET = [0.007,0,-0.015]
-        MAP_OFFSET = [0,-0.035,-0.009]
+        MAP_OFFSET = [0,-0.035,-0.003]
 
         self.wait_for_data()
 

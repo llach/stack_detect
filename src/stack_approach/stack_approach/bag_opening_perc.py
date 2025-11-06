@@ -261,7 +261,7 @@ def execute_opening(node, trajs):
         rclpy.spin_until_future_complete(node, fut)
         res = fut.result()
 
-        inp = input("good?").lower().strip()
+        inp = input("###################\n#######################\ngood?").lower().strip()
         if inp == "q":
             return
         elif inp == "y":
@@ -275,7 +275,7 @@ def execute_opening(node, trajs):
     
     move_over_bag(node, bag_pose_wrist)
 
-    input("go down?")
+    # input("go down?")
     grasp_pose = empty_pose(frame="left_arm_wrist_3_link")
     grasp_pose.pose.position.z = PRE_GRASP_HEIGHT - GRASP_HEIGHT
 
