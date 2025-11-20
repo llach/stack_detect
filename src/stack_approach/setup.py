@@ -36,6 +36,7 @@ setup(
             'roller_gripper = stack_approach.roller_gripper_service:main',
             'bag_opening = stack_approach.bag_opening:main',
             'bag_opening_perc = stack_approach.bag_opening_perc:main',
+            'primitive_test = stack_approach.primitive_test:main',
         ],
     },
 )
