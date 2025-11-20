@@ -58,7 +58,6 @@ class BagDetectNode(Node):
         self.get_logger().info("Initializing BagDetectNode...")
 
         self.cbg = ReentrantCallbackGroup()
-        qos = QoSProfile(depth=1)
         self.bridge = CvBridge()
 
         # --- Subscribers ---
@@ -66,7 +65,7 @@ class BagDetectNode(Node):
             CompressedImage,
             "/camera/color/image_raw/compressed",
             self.rgb_cb,
-            qos,
+            0,
             callback_group=self.cbg,
         )
 
@@ -74,7 +73,7 @@ class BagDetectNode(Node):
             ImageMSG,
             "/camera/aligned_depth_to_color/image_raw",
             self.depth_cb,
-            qos,
+            0,
             callback_group=self.cbg,
         )
 
@@ -82,15 +81,15 @@ class BagDetectNode(Node):
             CameraInfo,
             "/camera/color/camera_info",
             self.info_cb,
-            qos,
+            0
         )
 
         # --- Publishers ---
         self.img_pub = self.create_publisher(
-            CompressedImage, "/camera/color/bag/compressed", qos, callback_group=self.cbg
+            CompressedImage, "/camera/color/bag/compressed", 0, callback_group=self.cbg
         )
         self.dbg_img_pub = self.create_publisher(
-            CompressedImage, "/camera/color/bag_debug/compressed", qos, callback_group=self.cbg
+            CompressedImage, "/camera/color/bag_debug/compressed", 0, callback_group=self.cbg
         )
         self.bag_pose_pub = self.create_publisher(
             PoseStamped, "/bag_pose", 10, callback_group=self.cbg
@@ -270,7 +269,10 @@ class BagDetectNode(Node):
         cropped_cv = image_cv[y0:y1, x0:x1]
 
         # --- Get bag orientation & offset point ---
-        angle, box, offset_point, contour, dbg_image = get_bag_pose_from_array(cropped_cv, point_offset=0.15, closing_kernel_size=25)
+        angle, box, offset_point, contour, dbg_image = get_bag_pose_from_array(
+            cropped_cv, 
+            closing_kernel_size=25
+        )
         box_global = box + np.array([x0, y0])
         offset_global = (offset_point[0] + x0, offset_point[1] + y0)
 

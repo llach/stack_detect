@@ -73,7 +73,7 @@ def adjust_ts(ts, scaling=1, offset=0):
 
 class TrajectoryPublisher(Node):
     def __init__(self):
-        super().__init__('send_joint_trajectory')
+        super().__init__('bag_opening')
 
         self.recbg = ReentrantCallbackGroup()
 
@@ -109,11 +109,11 @@ class TrajectoryPublisher(Node):
             "right": self.create_client(RollerGripper, 'right_roller_gripper')
         }
 
-        for k, v in self.finger2srv.items():
-            print(f"waiting for {k.upper()} gripper srv")
-            while not v.wait_for_service(timeout_sec=2.0):
-                self.get_logger().info('service not available, waiting again...')
-            print(f"found {k.upper()} gripper srv")
+        # for k, v in self.finger2srv.items():
+        #     print(f"waiting for {k.upper()} gripper srv")
+        #     while not v.wait_for_service(timeout_sec=2.0):
+        #         self.get_logger().info('service not available, waiting again...')
+        #     print(f"found {k.upper()} gripper srv")
 
     def execute_traj(self, group, ts, qs):
         assert group in ["both", "left", "right"], f"unknown move group: {group}"
@@ -169,7 +169,7 @@ class TrajectoryPublisher(Node):
     def initial_pose(self):
         fut = self.execute_traj(
             "both", 
-            np.array([3]), 
+            np.array([4]), 
             np.array([
                 [ 1.39311028, -1.85827746, -2.0506866 , -0.98047812, -0.78614647, 0.45934969, -1.63986427, -0.50394781,  2.1300605 , -3.27673878, 0.80105019, -2.82983905] # old  start (cam facing front)
             ])
@@ -179,7 +179,7 @@ class TrajectoryPublisher(Node):
     def initial_pose_new(self):
         fut = self.execute_traj(
             "both", 
-            np.array([3]), 
+            np.array([4]), 
             np.array([
                 [  1.39311028, -1.85827746, -2.0506866 , -0.98047812, -0.78614647, 0.45934969, -1.44216556, -0.68469267,  2.24536608, -3.02081587,  0.7967428 , -1.56835287 ] # bag in camera view
             ])
@@ -190,8 +190,8 @@ class TrajectoryPublisher(Node):
         fut = self.execute_traj(
             "both", 
             np.array([
-                2,
                 3,
+                5,
                 # 30
             ]), 
             np.array([

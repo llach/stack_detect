@@ -75,7 +75,7 @@ def adjust_ts(ts, scaling=1, offset=0):
 
 class TrajectoryPublisher(Node):
     def __init__(self):
-        super().__init__('send_joint_trajectory')
+        super().__init__('bag_opening_perc')
 
         self.recbg = ReentrantCallbackGroup()
 
@@ -111,11 +111,11 @@ class TrajectoryPublisher(Node):
             "right": self.create_client(RollerGripper, 'right_roller_gripper')
         }
 
-        for k, v in self.finger2srv.items():
-            print(f"waiting for {k.upper()} gripper srv")
-            while not v.wait_for_service(timeout_sec=2.0):
-                self.get_logger().info('service not available, waiting again...')
-            print(f"found {k.upper()} gripper srv")
+        # for k, v in self.finger2srv.items():
+        #     print(f"waiting for {k.upper()} gripper srv")
+        #     while not v.wait_for_service(timeout_sec=2.0):
+        #         self.get_logger().info('service not available, waiting again...')
+        #     print(f"found {k.upper()} gripper srv")
 
 
         self.move_cli = self.create_client(MoveArm, "move_arm", callback_group=self.recbg)
@@ -157,6 +157,17 @@ class TrajectoryPublisher(Node):
         fut = cli.call_async(req)
         rclpy.spin_until_future_complete(self, fut)
         return fut.result()
+    
+
+    def initial_pose_new(self, dur=4):
+        fut = self.execute_traj(
+            "both", 
+            np.array([dur]), 
+            np.array([
+                [  1.39311028, -1.85827746, -2.0506866 , -0.98047812, -0.78614647, 0.45934969, -1.44216556, -0.68469267,  2.24536608, -3.02081587,  0.7967428 , -1.56835287 ] # bag in camera view
+            ])
+        )
+        await_action_future(self, fut)
     
 
 def load_trajectories(folder):
@@ -205,7 +216,7 @@ def move_over_bag(node, left_wrist_pose):
         target_pose = left_wrist_pose,
         execute = False,
         controller_name = "left_arm_joint_trajectory_controller",
-        execution_time = 2.5,
+        execution_time = 1.5,
         ik_link = "left_arm_wrist_3_link",
         name_target = ["left_arm_shoulder_pan_joint", "left_arm_shoulder_lift_joint", "left_arm_elbow_joint", "left_arm_wrist_1_joint", "left_arm_wrist_2_joint", "left_arm_wrist_3_joint"]
     )
@@ -242,7 +253,7 @@ def move_over_bag(node, left_wrist_pose):
 def execute_opening(node, trajs):
 
     PRE_GRASP_HEIGHT = 0.837
-    GRASP_HEIGHT = 0.7905
+    GRASP_HEIGHT = 0.7907
 
     node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=1650))
     node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=2950))
@@ -252,8 +263,8 @@ def execute_opening(node, trajs):
         print("calling bag_cli")
         fut = node.bag_cli.call_async(StackDetect.Request(
                 offset = Point(
-                    x=0.035, 
-                    y=-0.02, 
+                    x=0.03, 
+                    y=0.008 , 
                     z=PRE_GRASP_HEIGHT
                 )
             )
@@ -370,6 +381,7 @@ def execute_trajectories(node, arrays):
         if i == 2: # grasp bag
             node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(roller_vel=80, roller_duration=5.0))
             node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=3450))
+            # node.cli_display.call_async(SetDisplay.Request(name="protocol_9"))
         elif i == 5: # close right gripper
             node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=700))
 
@@ -387,12 +399,14 @@ def main(args=None):
         execute_opening(node, arrays)
     elif last_arg == "slides":
         print("executing with slides ...")
-        node.cli_display.call_async(SetDisplay.Request(name="protocol_1"))
-        time.sleep(10)
+        # node.cli_display.call_async(SetDisplay.Request(name="protocol_1"))
+        # time.sleep(10)
         node.cli_display.call_async(SetDisplay.Request(name="protocol_bag_1"))
 
         execute_opening(node, arrays)
         node.cli_display.call_async(SetDisplay.Request(name="protocol_bag_2"))
+        time.sleep(7)
+        node.cli_display.call_async(SetDisplay.Request(name="protocol_11"))
 
 
     node.destroy_node()

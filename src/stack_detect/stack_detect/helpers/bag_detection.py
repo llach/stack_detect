@@ -24,7 +24,6 @@ def expand_bounding_box(box, image_width, image_height, scale=1.1):
 
 def get_bag_pose_from_array(
     img_array,
-    point_offset=0.15,
     gauss_size=7,
     canny_thresh=(50, 150),
     closing_kernel_size=30
@@ -65,7 +64,7 @@ def get_bag_pose_from_array(
 
     width_vec = top_right - top_left
     height_vec = bottom_left - top_left
-    offset_point = top_left + 0.5 * width_vec + point_offset * height_vec
+    offset_point = top_left + 0.5 * width_vec
     offset_point = tuple(map(int, offset_point))
 
     # --- Build debug visualization (if enabled) ---
