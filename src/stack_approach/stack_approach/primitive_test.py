@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-import os
-import sys
-import glob
+import cv2
 import time
 import rclpy
 import numpy as np
@@ -17,10 +15,13 @@ from tf2_geometry_msgs import PointStamped, PoseStamped
 from stack_approach.controller_switcher import ControllerSwitcher
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from geometry_msgs.msg import Point
+from cv_bridge import CvBridge
 from stack_approach.helpers import transform_to_pose_stamped, publish_img, point_to_pose, empty_pose, get_trafo, inv, matrix_to_pose_msg, pose_to_matrix, call_cli_sync
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 from scipy.spatial.transform import Rotation as R
+from sensor_msgs.msg import CompressedImage
+from threading import Lock
 
 
 group2joints = {
@@ -70,8 +71,16 @@ class TrajectoryPublisher(Node):
         super().__init__('primitive_test')
 
         self.recbg = ReentrantCallbackGroup()
-
+        self.bridge = CvBridge()
         self.controller_switcher = ControllerSwitcher()
+
+        self.img_lock = Lock()
+        self.other_img_lock = Lock()
+        self.img_msg, self.other_img_lock = None, None
+
+        self.img_sub = self.create_subscription(
+            CompressedImage, "/camera/color/image_raw/compressed", self.rgb_cb, 0, callback_group=self.recbg
+        )
         
         self.group2client = {
             "both": ActionClient(
@@ -98,6 +107,10 @@ class TrajectoryPublisher(Node):
             "left": self.create_client(RollerGripper, 'left_roller_gripper'),
             "right": self.create_client(RollerGripper, 'right_roller_gripper')
         }
+
+        self.sam_client = self.create_client(StackDetect, "stack_detect")
+        while not self.sam_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('SAM service not available, waiting again...')
 
         # for k, v in self.finger2srv.items():
         #     print(f"waiting for {k.upper()} gripper srv")
@@ -129,6 +142,22 @@ class TrajectoryPublisher(Node):
             time.sleep(0.05)
             rclpy.spin_once(self)
         print("setup done!")
+
+    def rgb_cb(self, msg): 
+        with self.img_lock:
+            self.img_msg = msg 
+
+    def wait_for_data(self, timeout=5.0):
+        self.get_logger().info("Waiting for data ...")
+
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            if self.img_msg:
+                self.get_logger().info("All data received.")
+                return True
+            time.sleep(0.05)  # passive wait, lets executor run
+        self.get_logger().warn("Timeout while waiting for data.")
+        return False
 
     def execute_traj(self, group, ts, qs):
         assert group in ["both", "left", "right"], f"unknown move group: {group}"
@@ -179,15 +208,9 @@ class TrajectoryPublisher(Node):
         )
         await_action_future(self, fut)
 
-    def move_rel(self, x=0.0, y=0.0, z=0.0, time=5):
-        msg = transform_to_pose_stamped(self.tf_buffer.lookup_transform("map", "right_arm_wrist_3_link", rclpy.time.Time()))
-
-        msg.pose.position.x += x
-        msg.pose.position.y += y
-        msg.pose.position.z += z
-
+    def go_to_pose(self, pose, time):
         fut = self.move_cli.call_async(MoveArm.Request(
-            target_pose = msg,
+            target_pose = pose,
             execution_time = float(time),
             execute = True,
             controller_name = "right_arm_joint_trajectory_controller",
@@ -195,6 +218,16 @@ class TrajectoryPublisher(Node):
             name_target = ["right_arm_shoulder_pan_joint", "right_arm_shoulder_lift_joint", "right_arm_elbow_joint", "right_arm_wrist_1_joint", "right_arm_wrist_2_joint", "right_arm_wrist_3_joint"]
         ))
         rclpy.spin_until_future_complete(self, fut)
+
+
+    def move_rel(self, x=0.0, y=0.0, z=0.0, time=5):
+        msg = transform_to_pose_stamped(self.tf_buffer.lookup_transform("map", "right_arm_wrist_3_link", rclpy.time.Time()))
+
+        msg.pose.position.x += x
+        msg.pose.position.y += y
+        msg.pose.position.z += z
+
+        self.go_to_pose(msg, time)
 
 
 def await_action_future(node, fut):
@@ -220,64 +253,68 @@ def await_action_future(node, fut):
     return True
 
 def execute_opening(node, trajs):
-
-    grasp_pose = empty_pose(frame="left_arm_wrist_3_link")
-
-    fut = node.move_cli.call_async(MoveArm.Request(
-        execute = True,
-        target_pose = grasp_pose,
-        execution_time = 0.7,
-        controller_name = "left_arm_joint_trajectory_controller",
-        ik_link = "left_arm_wrist_3_link",
-        name_target = ["left_arm_shoulder_pan_joint", "left_arm_shoulder_lift_joint", "left_arm_elbow_joint", "left_arm_wrist_1_joint", "left_arm_wrist_2_joint", "left_arm_wrist_3_joint"]
-    ))
-    rclpy.spin_until_future_complete(node, fut)
-
     node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(roller_vel=80, roller_duration=5.0))
     node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=3500))
 
-
 def main(args=None):
-    GOAL_ANGLE = 40 # degrees
-    TRANS_OFFSET_MAP = [0, 0.19, 0.03] # meters
+    # GOAL_ANGLE = 55 # THIN degrees
+    # TRANS_OFFSET_MAP = [0, -0.05, 0.011] # THIN meters
+
+    GOAL_ANGLE = 45 # NORMAL degrees
+    TRANS_OFFSET_MAP = [0, -0.05, 0.021] # NORMAL meters
 
     rclpy.init(args=args)
     node = TrajectoryPublisher()
+
+    node.wait_for_data()
     
     node.start_pose(time=2)
+    time.sleep(0.5)
 
-    Tmf = get_trafo("map", "right_finger", node.tf_buffer)
-    Tfw = get_trafo("right_finger", "right_arm_wrist_3_link", node.tf_buffer)
+    while True:
+        fut = node.sam_client.call_async(StackDetect.Request())
+        rclpy.spin_until_future_complete(node, fut)
 
-    current_angle_offset = np.rad2deg(np.arccos(np.dot([0,1,0], Tmf[:3,:3]@[0,0,1]))) # angle between ground plane and z axis in wrist / finger frame
-    print(f"map Y <-> finger Z {current_angle_offset:.2f}deg")
+        stack_pose = fut.result().target_pose
 
-    goal_mat_finger = np.eye(4)
-    goal_mat_finger[:3,:3] = goal_mat_finger[:3,:3] @ R.from_euler("xyz", [0, -(GOAL_ANGLE - current_angle_offset), 0], degrees=True).as_matrix()
-    
-    goal_mat_finger_in_map = Tmf @ goal_mat_finger
-    goal_mat_finger_in_map[:3,3] += TRANS_OFFSET_MAP
+        stack_mat_in_finger = pose_to_matrix(node.tf_buffer.transform(stack_pose, "right_finger"))
+        stack_mat_in_finger[:3,:3] = np.eye(3)
 
-    goal_mat_wrist_in_map = goal_mat_finger_in_map @ Tfw
+        Tmf = get_trafo("map", "right_finger", node.tf_buffer)
+        Tfw = get_trafo("right_finger", "right_arm_wrist_3_link", node.tf_buffer)
 
-    goal_pose_finger = matrix_to_pose_msg(goal_mat_finger_in_map, "map")
-    goal_pose_wrist_in_finger  = matrix_to_pose_msg(goal_mat_wrist_in_map, "map")
+        current_angle_offset = np.rad2deg(np.arccos(np.dot([0,1,0], Tmf[:3,:3]@[0,0,1]))) # angle between ground plane and z axis in wrist / finger frame
+        print(f"map Y <-> finger Z {current_angle_offset:.2f}deg")
 
-    node.finger_pose_pub.publish(goal_pose_finger)
-    node.wrist_pose_pub.publish(goal_pose_wrist_in_finger)
+        goal_mat_finger = stack_mat_in_finger.copy()
+        goal_mat_finger[:3,:3] = goal_mat_finger[:3,:3] @ R.from_euler("xyz", [0, -(GOAL_ANGLE - current_angle_offset), 0], degrees=True).as_matrix()
+        
+        goal_mat_finger_in_map = Tmf @ goal_mat_finger
+        goal_mat_finger_in_map[:3,3] += TRANS_OFFSET_MAP
 
-    fut = node.move_cli.call_async(MoveArm.Request(
-        target_pose = goal_pose_wrist_in_finger,
-        execution_time = 3.0,
-        execute = True,
-        controller_name = "right_arm_joint_trajectory_controller",
-        ik_link = "right_arm_wrist_3_link",
-        name_target = ["right_arm_shoulder_pan_joint", "right_arm_shoulder_lift_joint", "right_arm_elbow_joint", "right_arm_wrist_1_joint", "right_arm_wrist_2_joint", "right_arm_wrist_3_joint"]
-    ))
-    rclpy.spin_until_future_complete(node, fut)
+        goal_mat_wrist_in_map = goal_mat_finger_in_map @ Tfw
 
-    node.move_rel(y=0.03, time=1)
-    node.move_rel(z=0.02, time=1)
+        goal_pose_finger_in_map = matrix_to_pose_msg(goal_mat_finger_in_map, "map")
+        goal_pose_wrist_in_map  = matrix_to_pose_msg(goal_mat_wrist_in_map, "map")
+
+        node.finger_pose_pub.publish(goal_pose_finger_in_map)
+        node.wrist_pose_pub.publish(goal_pose_wrist_in_map)
+
+        inp = input("####\ngood?").lower().strip()
+        if inp == "q":
+            return
+        elif inp == "y":
+            break
+
+    node.go_to_pose(goal_pose_wrist_in_map, 3)
+
+    node.move_rel(y=0.03, z=-0.01, time=.6)
+    node.move_rel(y=0.025, time=.6)
+
+    # node.move_rel(y=0.055, time=1)
+
+    node.move_rel(z=0.007, time=.3)
+    node.move_rel(y=0.025, time=.3)
 
     node.destroy_node()
     rclpy.shutdown()

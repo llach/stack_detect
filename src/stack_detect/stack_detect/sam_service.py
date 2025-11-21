@@ -45,6 +45,7 @@ class SAMGraspPointExtractor(Node):
         self.declare_parameter('dino_cpu', False)
         self.dino_cpu = self.get_parameter("dino_cpu").get_parameter_value().bool_value
 
+        print("creating models ...")
         self.sam = SAM2Model(checkpoint = f"/home/ros/pretrained/sam2/sam2.1_hiera_large.pt", model_cfg = "//home/ros/pretrained/sam2/sam2.1_hiera_l.yaml")
         self.dino = DINOModel(prefix="/home/ros/pretrained/dino/",cpu_only=self.dino_cpu)
 
@@ -52,6 +53,7 @@ class SAMGraspPointExtractor(Node):
         self.depth_lock = Lock()
         self.img_msg, self.depth_msg, self.K = None, None, None
 
+        print("creating subscriptions ...")
         self.depth_sub = self.create_subscription(
             ImageMSG, "/camera/aligned_depth_to_color/image_raw", self.depth_cb, 0, callback_group=self.cbg
         )
@@ -67,7 +69,7 @@ class SAMGraspPointExtractor(Node):
         
         self.img_pub = self.create_publisher(CompressedImage, '/camera/color/sam/compressed', 0, callback_group=self.cbg)
         self.grasp_point_pub = self.create_publisher(PointStamped, '/grasp_point', 10, callback_group=self.cbg)
-        self.grasp_pose_pub = self.create_publisher(PoseStamped, '/debug_grasp_pose', 10, callback_group=self.cbg)
+        self.grasp_pose_pub = self.create_publisher(PoseStamped, '/sam_grasp_pose', 10, callback_group=self.cbg)
 
         self.srv = self.create_service(StackDetect, '/stack_detect', self.extract_grasp_point)
 
@@ -135,8 +137,8 @@ class SAMGraspPointExtractor(Node):
             exit(0)
 
     def extract_grasp_point(self, req, res): 
+        return self.get_sam_thing(res)
         while True:
-            res = self.get_sam_thing(res)
             if input("###################\n#######################\ngood?").strip().lower() == "y": break
         self.get_logger().info("SAM service done!")
         return res
@@ -193,6 +195,17 @@ class SAMGraspPointExtractor(Node):
 
         # get 3D point and publish
         center_point = SAM2Model.get_center_point(line_center, depth_img, self.K) # center point is stamped in camera coordinates
+
+        center_pose = PoseStamped()
+        center_pose.header = center_point.header
+        center_pose.pose.position = center_point.point
+        center_pose.pose.orientation.w = 1.0
+
+        self.grasp_pose_pub.publish(center_pose)
+
+        res.success = True
+        res.target_pose = center_pose
+        return res
 
         grasp_pose_wrist = grasp_pose_to_wrist(self.tf_buffer, center_point, x_off=0.045, z_off=-0.20) # FRANKENROLLER
 
