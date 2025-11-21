@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-import cv2
+import os
 import time
 import rclpy
 import numpy as np
+from datetime import datetime
 
 from rclpy.node import Node
 from rclpy.action import ActionClient
@@ -22,6 +23,7 @@ from tf2_ros.transform_listener import TransformListener
 from scipy.spatial.transform import Rotation as R
 from sensor_msgs.msg import CompressedImage
 from threading import Lock
+from PIL import Image
 
 
 group2joints = {
@@ -76,10 +78,14 @@ class TrajectoryPublisher(Node):
 
         self.img_lock = Lock()
         self.other_img_lock = Lock()
-        self.img_msg, self.other_img_lock = None, None
+        self.img_msg, self.other_img_msg = None, None
 
         self.img_sub = self.create_subscription(
             CompressedImage, "/camera/color/image_raw/compressed", self.rgb_cb, 0, callback_group=self.recbg
+        )
+
+        self.img_sub = self.create_subscription(
+            CompressedImage, "/unfolding_camera/color/image_raw/compressed", self.other_rgb_cb, 0, callback_group=self.recbg
         )
         
         self.group2client = {
@@ -145,14 +151,18 @@ class TrajectoryPublisher(Node):
 
     def rgb_cb(self, msg): 
         with self.img_lock:
-            self.img_msg = msg 
+            self.img_msg = msg
+
+    def other_rgb_cb(self, msg): 
+        with self.other_img_lock:
+            self.other_img_msg = msg
 
     def wait_for_data(self, timeout=5.0):
         self.get_logger().info("Waiting for data ...")
 
         start_time = time.time()
         while time.time() - start_time < timeout:
-            if self.img_msg:
+            if self.img_msg and self.other_img_msg:
                 self.get_logger().info("All data received.")
                 return True
             time.sleep(0.05)  # passive wait, lets executor run
@@ -257,6 +267,8 @@ def execute_opening(node, trajs):
     node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=3500))
 
 def main(args=None):
+    store_base = f"/home/ros/study_data/{datetime.now().strftime('%Y_%m_%d-%H_%M_%S')}"
+
     # GOAL_ANGLE = 55 # THIN degrees
     # TRANS_OFFSET_MAP = [0, -0.05, 0.011] # THIN meters
 
@@ -268,8 +280,12 @@ def main(args=None):
 
     node.wait_for_data()
     
+    node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=2500))
     node.start_pose(time=2)
-    time.sleep(0.5)
+    time.sleep(1)
+
+    with node.img_lock:
+        img_b4 = node.bridge.compressed_imgmsg_to_cv2(node.img_msg, "rgb8")
 
     while True:
         fut = node.sam_client.call_async(StackDetect.Request())
@@ -315,6 +331,16 @@ def main(args=None):
 
     node.move_rel(z=0.007, time=.3)
     node.move_rel(y=0.025, time=.3)
+
+    node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=800))
+    time.sleep(0.2)
+
+    with node.other_img_lock:
+        img_after = node.bridge.compressed_imgmsg_to_cv2(node.other_img_msg, "rgb8")
+
+    os.makedirs(store_base, exist_ok=True)
+    Image.fromarray(img_b4).save(f"{store_base}/img_before.png")
+    Image.fromarray(img_after).save(f"{store_base}/img_after.png")
 
     node.destroy_node()
     rclpy.shutdown()
