@@ -160,6 +160,8 @@ class TrajectoryPublisher(Node):
     def wait_for_data(self, timeout=5.0):
         self.get_logger().info("Waiting for data ...")
 
+        self.img_msg, self.other_img_msg = None, None
+
         start_time = time.time()
         while time.time() - start_time < timeout:
             if self.img_msg and self.other_img_msg:
@@ -218,6 +220,14 @@ class TrajectoryPublisher(Node):
         )
         await_action_future(self, fut)
 
+    def go_to_q(self, q, time=3):
+        fut = self.execute_traj(
+            "right", 
+            np.array([float(time)]), 
+            np.array([q])
+        )
+        await_action_future(self, fut)
+
     def go_to_pose(self, pose, time):
         fut = self.move_cli.call_async(MoveArm.Request(
             target_pose = pose,
@@ -239,6 +249,10 @@ class TrajectoryPublisher(Node):
 
         self.go_to_pose(msg, time)
 
+    def ros_sleep(self, sec):
+        for _ in range(int(sec/0.1)):
+            time.sleep(0.1)
+            rclpy.spin_once(self)
 
 def await_action_future(node, fut):
     print("waiting for future ...")
@@ -267,7 +281,8 @@ def execute_opening(node, trajs):
     node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=3500))
 
 def main(args=None):
-    store_base = f"/home/ros/study_data/{datetime.now().strftime('%Y_%m_%d-%H_%M_%S')}"
+    run_name = datetime.now().strftime('%Y_%m_%d-%H_%M_%S')
+    store_base = f"/home/ros/ws/src/bag_opening/gg_placing_trials/{run_name}"
 
     # GOAL_ANGLE = 55 # THIN degrees
     # TRANS_OFFSET_MAP = [0, -0.05, 0.011] # THIN meters
@@ -281,13 +296,13 @@ def main(args=None):
     node.wait_for_data()
     
     node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=2500))
-    node.start_pose(time=2)
-    time.sleep(1)
-
-    with node.img_lock:
-        img_b4 = node.bridge.compressed_imgmsg_to_cv2(node.img_msg, "rgb8")
+    node.start_pose(time=5)
+    node.ros_sleep(1)
 
     while True:
+        with node.img_lock:
+            img_b4 = node.bridge.compressed_imgmsg_to_cv2(node.img_msg, "rgb8")
+
         fut = node.sam_client.call_async(StackDetect.Request())
         rclpy.spin_until_future_complete(node, fut)
 
@@ -321,11 +336,13 @@ def main(args=None):
             return
         elif inp == "y":
             break
+    
+    print(f"\n\n{run_name}\n\n")
 
     node.go_to_pose(goal_pose_wrist_in_map, 3)
 
     node.move_rel(y=0.03, z=-0.01, time=.6)
-    node.move_rel(y=0.025, time=.6)
+    node.move_rel(y=0.035, time=.6)
 
     # node.move_rel(y=0.055, time=1)
 
@@ -333,14 +350,38 @@ def main(args=None):
     node.move_rel(y=0.025, time=.3)
 
     node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=800))
-    time.sleep(0.2)
+    node.ros_sleep(0.2)
 
     with node.other_img_lock:
-        img_after = node.bridge.compressed_imgmsg_to_cv2(node.other_img_msg, "rgb8")
+        img_grasp = node.bridge.compressed_imgmsg_to_cv2(node.other_img_msg, "rgb8")
+
+    input("conf?")
+    
+    node.start_pose(time=2)
+
+    node.go_to_q([-1.1826,-0.669801,1.29451,-1.57216,0.941826,4.03527], time=2)
+    node.go_to_q([-0.829086,-1.01202,1.98262,-2.05671,0.951,3.88346], time=1.5)
+    node.go_to_q([-0.731177,-1.07293,1.9299,-1.88504,0.999185,3.78101], time=0.5)
+
+    node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=2500))
+    
+    node.go_to_q([-0.679236,-1.10291,1.97395,-1.87112,1.0267,3.72891], time=0.25)
+    node.go_to_q([-0.740686,-1.06235,2.12228,-2.09265,0.994247,3.7895], time=0.4)
+
+
+    node.go_to_q([-1.10223,-0.746435,2.00881,-2.5518,0.8478,4.20552], time=1)
+
+    node.go_to_q([-1.4472,-0.5199,2.0481,-2.9698,0.7930,-0.0089], time=2)
+
+    node.ros_sleep(1.5)
+
+    with node.img_lock:
+        img_table = node.bridge.compressed_imgmsg_to_cv2(node.img_msg, "rgb8")
 
     os.makedirs(store_base, exist_ok=True)
     Image.fromarray(img_b4).save(f"{store_base}/img_before.png")
-    Image.fromarray(img_after).save(f"{store_base}/img_after.png")
+    Image.fromarray(img_grasp).save(f"{store_base}/img_grasp.png")
+    Image.fromarray(img_table).save(f"{store_base}/img_table.png")
 
     node.destroy_node()
     rclpy.shutdown()
