@@ -139,6 +139,15 @@ class TrajectoryPublisher(Node):
         if self.latest_ft is None:
             return None
         return self.latest_ft.wrench.force.z
+    
+    def get_f(self):
+        if self.latest_ft is None:
+            return None
+        return [
+            self.latest_ft.wrench.force.x,
+            self.latest_ft.wrench.force.y,
+            self.latest_ft.wrench.force.z
+        ]
 
     def has_fresh_ft(self):
         if self.latest_ft is None or self.latest_ft_time is None:
@@ -286,9 +295,62 @@ class TrajectoryPublisher(Node):
         )
         return False
     
-def fc_down():
-    node = TrajectoryPublisher()
+    def open_gripper_on_force_change(self, threshold: float, sleep_time: float = 0.05):
+        """
+        Monitors F/T data and opens gripper if the sum of absolute
+        differences from the initial force vector exceeds `threshold`.
 
+        Args:
+            threshold: float, N, sum of |Fx-Fx0| + |Fy-Fy0| + |Fz-Fz0|
+            sleep_time: float, seconds between iterations
+
+        Returns:
+            True  -> gripper was opened
+            False -> exited loop without opening
+        """
+
+        # ----- Ensure fresh F/T data -----
+        while rclpy.ok() and not self.has_fresh_ft():
+            rclpy.spin_once(self, timeout_sec=0.1)
+
+        f_ref = self.get_f()
+        if f_ref is None:
+            self.get_logger().error("No F/T data available for reference")
+            return False
+
+        self.get_logger().info(f"Starting force monitor, ref={f_ref}")
+
+        while rclpy.ok():
+            rclpy.spin_once(self, timeout_sec=0.01)
+
+            f_cur = self.get_f()
+            if f_cur is None:
+                continue
+
+            # sum of absolute differences
+            diff_sum = sum(abs(fc - fr) for fc, fr in zip(f_cur, f_ref))
+
+            if diff_sum >= threshold:
+                self.get_logger().info(
+                    f"Force threshold exceeded: sum(|ΔF|)={diff_sum:.2f} >= {threshold}"
+                )
+                # Open gripper (replace with your gripper call)
+                node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=2000))
+                return True
+
+            # optional small sleep to throttle loop
+            self.ros_sleep(sleep_time)
+
+        return False
+
+
+def force_open(node: TrajectoryPublisher):
+    node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=2000))
+    input("cont?")
+    node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=3300))
+    node.open_gripper_on_force_change(4)
+
+def fc_down(node):
     # ---- Go to start pose ----
     node.go_to_degrees(
         deg=[
@@ -330,4 +392,6 @@ def fc_down():
   
 if __name__ == '__main__':
     rclpy.init()
-    fc_down()
+    node = TrajectoryPublisher()
+
+    force_open(node)
