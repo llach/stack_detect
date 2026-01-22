@@ -18,6 +18,14 @@ def generate_launch_description():
     nodes_to_start.append(
         Node(
             package='stack_approach',
+            executable='ft_publisher',
+            name='ft_publisher',
+            output="screen"
+        ),
+    )
+    nodes_to_start.append(
+        Node(
+            package='stack_approach',
             executable='roller_gripper',
             name='right_roller_gripper',
             output="screen",

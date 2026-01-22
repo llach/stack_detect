@@ -10,11 +10,10 @@ from stack_detect.helpers.dino_model import DINOModel, plot_boxes_to_image
 
 # ---------- PATH SETUP ----------
 script_dir = os.path.dirname(os.path.abspath(__file__))
-image_path = os.path.join(script_dir, "./gowns_shelf.png")
+image_path = os.path.join(script_dir, "image.png")
 
-ckp_root = os.path.expanduser(f"{os.environ['HOME']}/repos/ckp")
 
-DINO_PREFIX = os.path.join(ckp_root, "")
+SAM_DIR = 
 SAM_CKPT = os.path.join(ckp_root, "sam2.1_hiera_large.pt")
 SAM_CFG = os.path.join(ckp_root, "sam2.1_hiera_l.yaml")
 

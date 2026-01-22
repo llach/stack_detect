@@ -253,7 +253,7 @@ def move_over_bag(node, left_wrist_pose):
 def execute_opening(node, trajs):
 
     PRE_GRASP_HEIGHT = 0.837
-    GRASP_HEIGHT = 0.7907
+    GRASP_HEIGHT = 0.790
 
     node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=1650))
     node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=2950))
@@ -264,7 +264,7 @@ def execute_opening(node, trajs):
         fut = node.bag_cli.call_async(StackDetect.Request(
                 offset = Point(
                     x=0.03, 
-                    y=0.008 , 
+                    y=0.01,
                     z=PRE_GRASP_HEIGHT
                 )
             )
@@ -300,7 +300,7 @@ def execute_opening(node, trajs):
     ))
     rclpy.spin_until_future_complete(node, fut)
 
-    node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(roller_vel=80, roller_duration=5.0))
+    node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(roller_vel=80, roller_duration=3.5))
     node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=3500))
 
     grasp_pose_up = empty_pose(frame="left_arm_wrist_3_link")
@@ -380,7 +380,7 @@ def execute_trajectories(node, arrays):
         ###### POST ACTIONS
         if i == 2: # grasp bag
             node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(roller_vel=80, roller_duration=5.0))
-            node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=3450))
+            node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=3500))
             # node.cli_display.call_async(SetDisplay.Request(name="protocol_9"))
         elif i == 5: # close right gripper
             node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=700))

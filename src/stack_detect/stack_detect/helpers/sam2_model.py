@@ -233,7 +233,7 @@ class SAM2Model:
     def __init__(self, 
         points_per_side = 24, 
         points_per_batch = 44, 
-        pred_iou_thresh = 0.7,
+        pred_iou_thresh = 0.6,
         stability_score_thresh=0.8,
         stability_score_offset=0.7,
         checkpoint = f"{os.environ['HOME']}/repos/ckp/sam2.1_hiera_large.pt",

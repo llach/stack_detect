@@ -282,7 +282,7 @@ def execute_opening(node, trajs):
 
 def main(args=None):
     run_name = datetime.now().strftime('%Y_%m_%d-%H_%M_%S')
-    store_base = f"/home/ros/ws/src/bag_opening/gg_placing_trials/{run_name}"
+    store_base = f"/home/ros/ws/src/bag_opening/gg_full_trials/{run_name}_unstacking"
 
     # GOAL_ANGLE = 55 # THIN degrees
     # TRANS_OFFSET_MAP = [0, -0.05, 0.011] # THIN meters
@@ -296,7 +296,7 @@ def main(args=None):
     node.wait_for_data()
     
     node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=2500))
-    node.start_pose(time=5)
+    node.start_pose(time=3)
     node.ros_sleep(1)
 
     while True:
@@ -341,6 +341,7 @@ def main(args=None):
 
     node.go_to_pose(goal_pose_wrist_in_map, 3)
 
+    # return
     node.move_rel(y=0.03, z=-0.01, time=.6)
     node.move_rel(y=0.035, time=.6)
 
@@ -352,8 +353,10 @@ def main(args=None):
     node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=800))
     node.ros_sleep(0.2)
 
+    return
+
     with node.other_img_lock:
-        img_grasp = node.bridge.compressed_imgmsg_to_cv2(node.other_img_msg, "rgb8")
+        img_grasp = node.bridge.compressed_imgmsg_to_cv2(node.other_img_msg, "rgb8") if node.other_img_msg else None
 
     input("conf?")
     
