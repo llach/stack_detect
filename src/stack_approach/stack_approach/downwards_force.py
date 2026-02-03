@@ -16,6 +16,10 @@ from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 from geometry_msgs.msg import WrenchStamped
 
+from moveit_msgs.srv import GetPositionIK
+from moveit_msgs.msg import PositionIKRequest, RobotState
+from sensor_msgs.msg import JointState
+
 import sys
 import select
 
@@ -107,16 +111,28 @@ class TrajectoryPublisher(Node):
             "right": self.create_client(RollerGripper, 'right_roller_gripper')
         }
 
+        self.ik_client = self.create_client(
+            srv_type=GetPositionIK,
+            srv_name="compute_ik",
+            callback_group=self.recbg,
+        )
+
         # ---- F/T data ----
         self.latest_ft = None
         self.latest_ft_time = None
-        self.ft_timeout = 0.1  # seconds
+        self.data_timeout = 0.1  # seconds
 
         self.create_subscription(
             WrenchStamped,
             '/ur5/ft_raw',
             self.ft_callback,
             10
+        )
+
+        self.current_q = None
+        self.latest_js_time = None
+        self.create_subscription(
+            JointState, "/joint_states", self.js_callback, 0#, callback_group=self.recbg
         )
 
         self.move_cli = self.create_client(MoveArm, "move_arm", callback_group=self.recbg)
@@ -135,6 +151,10 @@ class TrajectoryPublisher(Node):
             rclpy.spin_once(self)
         print("setup done!")
 
+    def js_callback(self, msg):
+        self.current_q = {jname: q for jname, q in zip(msg.name, msg.position)}
+        self.latest_js_time = time.time()
+
     def get_fz(self):
         if self.latest_ft is None:
             return None
@@ -152,7 +172,16 @@ class TrajectoryPublisher(Node):
     def has_fresh_ft(self):
         if self.latest_ft is None or self.latest_ft_time is None:
             return False
-        return (time.time() - self.latest_ft_time) < self.ft_timeout
+        return (time.time() - self.latest_ft_time) < self.data_timeout
+    
+    def has_fresh_js(self):
+        if self.current_q is None or self.latest_js_time is None:
+            return False
+        return (time.time() - self.latest_js_time) < self.data_timeout
+    
+    def get_js(self):
+        if self.current_q is None: return None
+        return self.current_q.copy()
 
     def ft_callback(self, msg: WrenchStamped):
         self.latest_ft = msg
@@ -204,7 +233,7 @@ class TrajectoryPublisher(Node):
         )
         await_action_future(self, fut)
 
-    def go_to_pose(self, pose, time, side="left"):
+    def go_to_pose(self, pose, time, side="left", blocking=True):
         fut = self.move_cli.call_async(MoveArm.Request(
             target_pose = pose,
             execution_time = float(time),
@@ -213,23 +242,80 @@ class TrajectoryPublisher(Node):
             ik_link = f"{side}_arm_wrist_3_link",
             name_target = [f"{side}_arm_shoulder_pan_joint", f"{side}_arm_shoulder_lift_joint", f"{side}_arm_elbow_joint", f"{side}_arm_wrist_1_joint", f"{side}_arm_wrist_2_joint", f"{side}_arm_wrist_3_joint"]
         ))
+        if not blocking: return fut
         rclpy.spin_until_future_complete(self, fut)
 
-    def move_rel_wrist(self, x=0.0, y=0.0, z=0.0, time=5, side="left"):
+    def move_rel_wrist(self, x=0.0, y=0.0, z=0.0, time=5, side="left", blocking=True):
         msg = transform_to_pose_stamped(self.tf_buffer.lookup_transform("map", f"{side}_arm_wrist_3_link", rclpy.time.Time()))
 
         msg.pose.position.x += x
         msg.pose.position.y += y
         msg.pose.position.z += z
 
-        self.go_to_pose(msg, time)
+        return self.go_to_pose(msg, time, side=side, blocking=blocking)
+    
+    def compute_ik_with_retries(
+        self,
+        pose_stamped: PoseStamped,
+        current_state: dict,
+        side: str,
+        retries: int = 3,
+    ):
+        joint_names = list(current_state.keys())
+        qs = list(current_state.values())
+
+        for attempt in range(retries):
+            self.get_logger().info(f"MoveIt IK attempt {attempt+1}/{retries}")
+
+            req = GetPositionIK.Request()
+            ik_req = PositionIKRequest()
+
+            ik_req.group_name = f"{side}_arm"
+            ik_req.pose_stamped = pose_stamped
+            ik_req.ik_link_name = f"{side}_arm_wrist_3_link"
+            ik_req.robot_state.joint_state.name = joint_names
+            ik_req.robot_state.joint_state.position = qs
+            ik_req.timeout.sec = 0
+            ik_req.timeout.nanosec = int(0.2 * 1e9)
+            ik_req.avoid_collisions = False  # set True if you want collision checking
+
+            req.ik_request = ik_req
+
+            fut = self.ik_client.call_async(req)
+            rclpy.spin_until_future_complete(self, fut)
+            res = fut.result()
+
+            if res is None:
+                self.get_logger().warn("IK service returned None")
+                continue
+
+            if res.error_code.val != res.error_code.SUCCESS:
+                self.get_logger().warn(f"IK failed with code {res.error_code.val}")
+                continue
+
+            sol_state = res.solution.joint_state
+            print("ss", sol_state)
+
+            # Map solution joints into controller joint order
+            sol_map = dict(zip(sol_state.name, sol_state.position))
+            try:
+                q = [sol_map[j] for j in joint_names]
+            except KeyError as e:
+                self.get_logger().error(f"IK solution missing joint {e}")
+                continue
+
+            return q
+
+        self.get_logger().error("MoveIt IK failed after retries")
+        return None
+
 
     def ros_sleep(self, sec):
         for _ in range(int(sec/0.1)):
             time.sleep(0.1)
             rclpy.spin_once(self)
 
-    def descend_until_force(
+    def descend_until_force_step(
         self,
         force_goal: float,
         delta_z: float,
@@ -295,6 +381,120 @@ class TrajectoryPublisher(Node):
         )
         return False
     
+    def move_along_z_until_force_traj(
+        self,
+        force_goal: float,
+        traj_time: float,
+        dist: float,
+        side: str = "left",
+    ):
+
+        while rclpy.ok() and not self.has_fresh_ft() and not self.has_fresh_js():
+            rclpy.spin_once(self, timeout_sec=0.1)
+
+        fz_ref = self.get_fz()
+        if fz_ref is None:
+            self.get_logger().error("No initial Fz available")
+            return False
+
+        self.get_logger().info(f"Starting force descent, Fz_ref = {fz_ref:.2f} N")
+
+
+        traj = self.build_cartesian_down_traj(dist, traj_time, side)
+        if traj is None:
+            self.get_logger().error("Failed to build descent trajectory")
+            return False
+
+        goal_handle = self.send_traj_and_get_handle(traj, side)
+        if goal_handle is None:
+            self.get_logger().error("Failed to execute descent trajectory")
+            return False
+
+        result_future = goal_handle.get_result_async()
+
+        # ---- Monitor force while moving ----
+        while rclpy.ok() and not result_future.done():
+            rclpy.spin_once(self, timeout_sec=0.01)
+
+            if not self.has_fresh_ft():
+                continue
+
+            fz = self.get_fz()
+            if fz is None:
+                continue
+
+            if abs(fz - fz_ref) >= force_goal:
+                self.get_logger().info(
+                    f"Force change detected: |{fz:.2f} - {fz_ref:.2f}| >= {force_goal}"
+                )
+                self.get_logger().warn("Cancelling trajectory due to contact!")
+
+                cancel_fut = goal_handle.cancel_goal_async()
+                rclpy.spin_until_future_complete(self, cancel_fut)
+                return True
+
+        self.get_logger().info("Descent finished without detecting force change")
+        return False
+
+    def build_cartesian_down_traj(self, dist: float, traj_time: float, side: str):
+        # Current EE pose in map frame
+        tf = self.tf_buffer.lookup_transform(
+            "map",
+            f"{side}_arm_wrist_3_link",
+            rclpy.time.Time()
+        )
+
+        start_pose = transform_to_pose_stamped(tf)
+
+        target_pose = PoseStamped()
+        target_pose.header.frame_id = "map"
+        target_pose.pose = start_pose.pose
+        target_pose.pose.position.z += dist
+
+        js = self.get_js()
+        current_state = {jn: js[jn] for jn in group2joints[side]}
+        q_target = self.compute_ik_with_retries(target_pose, current_state, side)
+        if q_target is None:
+            return None
+
+        # We assume controller starts from current state, so single waypoint is fine
+        traj = JointTrajectory()
+        traj.joint_names = group2joints[side]
+
+        current_q = self.get_js()
+        print([current_q[jn] for jn in group2joints[side]])
+        print(q_target)
+
+        point = JointTrajectoryPoint()
+        point.positions = list(q_target)
+        point.time_from_start.sec = int(traj_time)
+        point.time_from_start.nanosec = int((traj_time % 1.0) * 1e9)
+
+        traj.points.append(point)
+        return traj
+
+    def send_traj_and_get_handle(self, traj: JointTrajectory, side: str):
+        self.controller_switcher.activate_controller(group2controller[side])
+
+        goal = FollowJointTrajectory.Goal()
+        goal.trajectory = traj
+
+        client = self.group2client[side]
+        fut = client.send_goal_async(goal)
+
+        while not fut.done() and rclpy.ok():
+            rclpy.spin_once(self, timeout_sec=0.01)
+
+        goal_handle = fut.result()
+
+        if not goal_handle.accepted:
+            self.get_logger().error("Trajectory goal rejected")
+            return None
+
+        self.get_logger().info("Trajectory goal accepted")
+        return goal_handle
+
+
     def open_gripper_on_force_change(self, threshold: float, sleep_time: float = 0.05):
         """
         Monitors F/T data and opens gripper if the sum of absolute
@@ -344,23 +544,26 @@ class TrajectoryPublisher(Node):
         return False
 
 
-def force_open(node: TrajectoryPublisher):
+def force_open(node: TrajectoryPublisher, force_lim = 4):
     node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=2000))
+    # node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(roller_vel=80, roller_duration=5.0))
     input("cont?")
     node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=3300))
-    node.open_gripper_on_force_change(4)
+    node.open_gripper_on_force_change(force_lim)
 
-def fc_down(node):
+def fc_down(node, force_goal=5):
+    start_pose = [
+        85.54,
+        -117.26,
+        -68.25,
+        -278.44,
+        46.06,
+        -61.97
+    ]
+
     # ---- Go to start pose ----
     node.go_to_degrees(
-        deg=[
-            90.90,
-            -116.09,
-            -76.30,
-            -265.4,
-            44.87,
-            -70.81
-        ],
+        deg=start_pose,
         time=2,
         side="left"
     )
@@ -375,11 +578,18 @@ def fc_down(node):
     node.get_logger().info("F/T data ready, starting descent")
 
     # ---- Force-controlled descent ----
-    success = node.descend_until_force(
-        force_goal=5.0,     # N
-        delta_z=0.0002,     # m
-        traj_time=0.05,     # s
-        max_dist=0.03,      # m
+    # success = node.descend_until_force(
+    #     force_goal=force_goal,     # N
+    #     delta_z=0.0004,     # m
+    #     traj_time=0.02,     # s
+    #     max_dist=0.03,      # m
+    #     side="left"
+    # )
+
+    success = node.move_along_z_until_force_traj(
+        force_goal=force_goal,     # N
+        traj_time=5.0,     # s
+        dist=-0.02,      # m
         side="left"
     )
 
@@ -388,10 +598,23 @@ def fc_down(node):
     else:
         node.get_logger().warn("Contact NOT detected")
 
+    input("cont?")
+    # ---- Go to start pose ----
+    node.go_to_degrees(
+        deg=start_pose,
+        time=2,
+        side="left"
+    )
+
     rclpy.shutdown()
   
 if __name__ == '__main__':
     rclpy.init()
     node = TrajectoryPublisher()
 
-    force_open(node)
+    fd = True
+
+    if fd:
+        fc_down(node, force_goal=4)
+    else:
+        force_open(node, force_lim=6)

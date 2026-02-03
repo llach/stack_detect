@@ -33,7 +33,7 @@ setup(
             'cloud_pose_vary = stack_approach.cloud_pose_vary:main',
             'gripper = stack_approach.gripper_service:main',
             'blue_gripper = stack_approach.blue_gripper_service:main',
-            'roller_gripper = stack_approach.roller_gripper_service:main',
+            'roller_gripper = stack_approach.roller_gripper_service_v2:main',
             'bag_opening = stack_approach.bag_opening:main',
             'bag_opening_perc = stack_approach.bag_opening_perc:main',
             'primitive_test = stack_approach.primitive_test:main',
