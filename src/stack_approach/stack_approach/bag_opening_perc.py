@@ -5,19 +5,20 @@ import glob
 import time
 import rclpy
 import numpy as np
+from collections import deque
 
 from rclpy.node import Node
 from rclpy.action import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
 from control_msgs.action import FollowJointTrajectory
 from softenable_display_msgs.srv import SetDisplay
-from stack_msgs.srv import RollerGripper, StackDetect, MoveArm
+from stack_msgs.srv import RollerGripper, StackDetect, MoveArm, RollerGripperV2
 from stack_approach.motion_helper import MotionHelper
 from stack_approach.controller_switcher import ControllerSwitcher
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from geometry_msgs.msg import Point
 from stack_approach.helpers import empty_pose
-
+from geometry_msgs.msg import WrenchStamped
 
 move_groups = [
     "both",
@@ -81,9 +82,9 @@ class TrajectoryPublisher(Node):
 
         self.controller_switcher = ControllerSwitcher()
 
-        self.cli_display = self.create_client(SetDisplay, '/set_display')
-        while not self.cli_display.wait_for_service(timeout_sec=1.0):
-            self.get_logger().info('Waiting for /set_display service...')
+        # self.cli_display = self.create_client(SetDisplay, '/set_display')
+        # while not self.cli_display.wait_for_service(timeout_sec=1.0):
+        #     self.get_logger().info('Waiting for /set_display service...')
         
         self.group2client = {
             "both": ActionClient(
@@ -108,8 +109,25 @@ class TrajectoryPublisher(Node):
 
         self.finger2srv = {
             "left": self.create_client(RollerGripper, 'left_roller_gripper'),
-            "right": self.create_client(RollerGripper, 'right_roller_gripper')
+            "right": self.create_client(RollerGripper, 'right_roller_gripper'),
+            "left_v2": self.create_client(RollerGripperV2, 'left_gripper_normalized'),
+            "right_v2": self.create_client(RollerGripperV2, 'right_gripper_normalized')
         }
+
+        for n, srv in self.finger2srv.items():
+            print("waiting for", n)
+            srv.wait_for_service(timeout_sec=1.0)
+
+        self.latest_ft = None
+        self.latest_ft_time = None
+        self.data_timeout = 0.1  # seconds
+
+        self.create_subscription(
+            WrenchStamped,
+            '/ur5/ft_raw',
+            self.ft_callback,
+            10
+        )
 
         # for k, v in self.finger2srv.items():
         #     print(f"waiting for {k.upper()} gripper srv")
@@ -126,6 +144,70 @@ class TrajectoryPublisher(Node):
         self.bag_cli = self.create_client(StackDetect, "detect_bag", callback_group=self.recbg)
         while not self.bag_cli.wait_for_service(timeout_sec=1.0):
             self.get_logger().info('bag detect service not available, waiting again...')
+
+    def has_fresh_ft(self):
+        if self.latest_ft is None or self.latest_ft_time is None:
+            return False
+        return (time.time() - self.latest_ft_time) < self.data_timeout
+
+    def ft_callback(self, msg: WrenchStamped):
+        f = msg.wrench.force
+        self.latest_ft = [f.x, f.y, f.z]
+
+        self.latest_ft_time = time.time()
+
+    def wait_for_force_change(self, threshold: float, sleep_time: float = 0.05):
+        """
+        Monitors F/T data and opens gripper if the sum of absolute
+        differences from the initial force vector exceeds `threshold`.
+
+        Args:
+            threshold: float, N, sum of |Fx-Fx0| + |Fy-Fy0| + |Fz-Fz0|
+            sleep_time: float, seconds between iterations
+
+        Returns:
+            True  -> gripper was opened
+            False -> exited loop without opening
+        """
+
+        # ----- Ensure fresh F/T data -----
+        while rclpy.ok() and not self.has_fresh_ft():
+            rclpy.spin_once(self, timeout_sec=0.1)
+
+        f_ref = self.latest_ft.copy()
+        if f_ref is None:
+            self.get_logger().error("No F/T data available for reference")
+            return False
+
+        self.get_logger().info(f"Starting force monitor, ref={f_ref}")
+
+        start = time.time()
+        while rclpy.ok() and (time.time() - start) < 180:
+            rclpy.spin_once(self, timeout_sec=0.01)
+
+            f_cur = self.latest_ft.copy()
+            if f_cur is None:
+                continue
+
+            # sum of absolute differences
+            diff_sum = sum(abs(fc - fr) for fc, fr in zip(f_cur, f_ref))
+
+            if diff_sum >= threshold:
+                self.get_logger().info(
+                    f"Force threshold exceeded: sum(|ΔF|)={diff_sum:.2f} >= {threshold}"
+                )
+                return True
+
+            # optional small sleep to throttle loop
+            self.ros_sleep(sleep_time)
+
+        print("FT release timeout!")
+        return False
+
+    def ros_sleep(self, sec):
+        for _ in range(int(sec/0.1)):
+            time.sleep(0.1)
+            rclpy.spin_once(self)
 
 
     def execute_traj(self, group, ts, qs):
@@ -301,7 +383,7 @@ def execute_opening(node, trajs):
     rclpy.spin_until_future_complete(node, fut)
 
     node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(roller_vel=80, roller_duration=3.5))
-    node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=3500))
+    node.call_cli_sync(node.finger2srv["left_v2"], RollerGripperV2.Request(position=-1.0))
 
     grasp_pose_up = empty_pose(frame="left_arm_wrist_3_link")
     grasp_pose_up.pose.position.z = -0.02
@@ -330,6 +412,32 @@ def execute_opening(node, trajs):
     await_action_future(node, fut)
 
     execute_trajectories(node, trajs)
+    time.sleep(1.5)
+
+    print("waiting for force!")
+    node.wait_for_force_change(0.55)
+    print("FORCE CHANGE")
+    time.sleep(1.5)
+
+    node.call_cli_sync(node.finger2srv["right_v2"], RollerGripperV2.Request(position=1.0))
+    time.sleep(0.2)
+
+    fut = node.execute_traj(
+            "left", 
+            np.array([
+                1.5,
+                3
+            ]), 
+            np.array([
+                PRE_PLACE_LEFT,
+                PLACE_LEFT
+            ])
+        )
+    await_action_future(node, fut)
+
+    node.call_cli_sync(node.finger2srv["left_v2"], RollerGripperV2.Request(position=1.0))
+
+
 
 def execute_trajectories(node, arrays):
     arrays.append({
@@ -380,10 +488,31 @@ def execute_trajectories(node, arrays):
         ###### POST ACTIONS
         if i == 2: # grasp bag
             node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(roller_vel=80, roller_duration=5.0))
-            node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=3500))
+            node.call_cli_sync(node.finger2srv["left_v2"], RollerGripperV2.Request(position=-1.0))
+            time.sleep(0.2)
             # node.cli_display.call_async(SetDisplay.Request(name="protocol_9"))
         elif i == 5: # close right gripper
-            node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=700))
+            node.call_cli_sync(node.finger2srv["right_v2"], RollerGripperV2.Request(position=-1.0))
+            time.sleep(0.2)
+
+PRE_PLACE_LEFT = [
+    2.2566,
+    -1.6983,
+    -2.0718,
+    0.8025,
+    0.5113,
+    -3.2023,
+]
+
+PLACE_LEFT = [
+    2.3772,
+    -1.2721,
+    -1.8276,
+    1.4037,
+    0.9858,
+    -4.5638,
+]
+
 
 def main(args=None):
     arrays = load_trajectories(f"/home/ros/ws/src/bag_opening/trajectories/")
@@ -393,6 +522,11 @@ def main(args=None):
     node = TrajectoryPublisher()
     
     last_arg = sys.argv[-1]
+
+    node.call_cli_sync(node.finger2srv["right_v2"], RollerGripperV2.Request(position=1.0))
+    node.call_cli_sync(node.finger2srv["left_v2"], RollerGripperV2.Request(position=1.0))
+
+    node.initial_pose_new(dur=5)
 
     if "bag_opening_perc" in last_arg: # with "in", we catch execution with python and ros2 run
         print("executing normally ...")

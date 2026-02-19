@@ -15,7 +15,7 @@ class UR5RawFTPublisher(Node):
         super().__init__('ur5_raw_ft_publisher')
 
         # ---------------- Parameters ----------------
-        self.declare_parameter("smooth_window", 5)  # NEW
+        self.declare_parameter("smooth_window", 75)  # NEW
         self.smooth_window = self.get_parameter("smooth_window").value  # NEW
 
         # ---------------- ROS ----------------

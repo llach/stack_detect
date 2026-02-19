@@ -84,9 +84,9 @@ class TrajectoryPublisher(Node):
             CompressedImage, "/camera/color/image_raw/compressed", self.rgb_cb, 0, callback_group=self.recbg
         )
 
-        self.img_sub = self.create_subscription(
-            CompressedImage, "/unfolding_camera/color/image_raw/compressed", self.other_rgb_cb, 0, callback_group=self.recbg
-        )
+        # self.img_sub = self.create_subscription(
+        #     CompressedImage, "/unfolding_camera/color/image_raw/compressed", self.other_rgb_cb, 0, callback_group=self.recbg
+        # )
         
         self.group2client = {
             "both": ActionClient(
@@ -164,7 +164,7 @@ class TrajectoryPublisher(Node):
 
         start_time = time.time()
         while time.time() - start_time < timeout:
-            if self.img_msg and self.other_img_msg:
+            if self.img_msg:
                 self.get_logger().info("All data received.")
                 return True
             time.sleep(0.05)  # passive wait, lets executor run
@@ -295,13 +295,14 @@ def main(args=None):
 
     node.wait_for_data()
     
-    node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=2500))
-    node.start_pose(time=3)
-    node.ros_sleep(1)
+    # node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=2500))
+    # node.start_pose(time=3)
+    # node.ros_sleep(1)
 
     while True:
-        with node.img_lock:
-            img_b4 = node.bridge.compressed_imgmsg_to_cv2(node.img_msg, "rgb8")
+        # with node.img_lock:
+        #     if node.img_msg is None: continue
+        #     img_b4 = node.bridge.compressed_imgmsg_to_cv2(node.img_msg, "rgb8")
 
         fut = node.sam_client.call_async(StackDetect.Request())
         rclpy.spin_until_future_complete(node, fut)
@@ -331,6 +332,7 @@ def main(args=None):
         node.finger_pose_pub.publish(goal_pose_finger_in_map)
         node.wrist_pose_pub.publish(goal_pose_wrist_in_map)
 
+        exit(0)
         inp = input("####\ngood?").lower().strip()
         if inp == "q":
             return
@@ -339,32 +341,35 @@ def main(args=None):
     
     print(f"\n\n{run_name}\n\n")
 
-    node.go_to_pose(goal_pose_wrist_in_map, 3)
+    node.go_to_pose(goal_pose_wrist_in_map, 10)
 
     # return
-    node.move_rel(y=0.03, z=-0.01, time=.6)
-    node.move_rel(y=0.035, time=.6)
+    node.move_rel(y=0.03, z=-0.01, time=.6) # 0.02 d 0.011 d
+    node.move_rel(y=0.035, time=.6)# 0.055 d 0.011 h
 
     # node.move_rel(y=0.055, time=1)
 
-    node.move_rel(z=0.007, time=.3)
-    node.move_rel(y=0.025, time=.3)
+    node.move_rel(z=0.007, time=.3) #  0.055 d 0.018 h
+    node.move_rel(y=0.025, time=.3) #  0.08  d 0.018 h
 
     node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=800))
     node.ros_sleep(0.2)
 
-    return
+    # with node.other_img_lock:
+    #     img_grasp = node.bridge.compressed_imgmsg_to_cv2(node.other_img_msg, "rgb8") if node.other_img_msg else None
 
-    with node.other_img_lock:
-        img_grasp = node.bridge.compressed_imgmsg_to_cv2(node.other_img_msg, "rgb8") if node.other_img_msg else None
+    if input("conf?").strip().lower() != "y": return
 
-    input("conf?")
     
-    node.start_pose(time=2)
+    node.start_pose(time=5) # 2
 
-    node.go_to_q([-1.1826,-0.669801,1.29451,-1.57216,0.941826,4.03527], time=2)
-    node.go_to_q([-0.829086,-1.01202,1.98262,-2.05671,0.951,3.88346], time=1.5)
-    node.go_to_q([-0.731177,-1.07293,1.9299,-1.88504,0.999185,3.78101], time=0.5)
+    if input("conf?").strip().lower() != "y": return
+
+
+    exit(0)
+    node.go_to_q([-1.1826,-0.669801,1.29451,-1.57216,0.941826,4.03527], time=2) # 2
+    node.go_to_q([-0.829086,-1.01202,1.98262,-2.05671,0.951,3.88346], time=1.5) # 1.5
+    node.go_to_q([-0.731177,-1.07293,1.9299,-1.88504,0.999185,3.78101], time=0.5) # 0.5
 
     node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=2500))
     

@@ -166,6 +166,31 @@ class TrajectoryPublisher(Node):
             ])]
     """
 
+    def gg_initial(self):
+        q_home = {
+            'right_arm_shoulder_lift_joint': -0.5198910993388672,
+            'right_arm_wrist_1_joint': -2.969889303246969,
+            'right_arm_wrist_3_joint': -0.008974854146138966,
+            'right_arm_shoulder_pan_joint': -1.4472535292254847,
+            'right_arm_wrist_2_joint': 0.7931247353553772,
+            'left_arm_shoulder_pan_joint': 1.8965781927108765,
+            'left_arm_wrist_1_joint': -0.8012254995158692,
+            'left_arm_wrist_3_joint': -0.19198924699892217,
+            'left_arm_elbow_joint': -1.9840706586837769,
+            'left_arm_wrist_2_joint': -0.8360155264483851,
+            'right_arm_elbow_joint': 2.0481770674334925,
+            'left_arm_shoulder_lift_joint': -1.614753862420553
+        }
+
+        fut = self.execute_traj(
+            "both", 
+            np.array([4]), 
+            np.array([
+                [q_home[n] for n in group2joints["both"]]
+            ])
+        )
+        await_action_future(self, fut)
+
     def initial_pose(self):
         fut = self.execute_traj(
             "both", 
@@ -386,6 +411,8 @@ def main(args=None):
     elif last_arg == "calib":
         print("doing bag calib")
         calib(node, arrays)
+    elif  last_arg == "gg_initial":
+        node.gg_initial()
     elif last_arg == "slides":
         print("executing with slides ...")
         node.cli_display.call_async(SetDisplay.Request(name="protocol_1"))

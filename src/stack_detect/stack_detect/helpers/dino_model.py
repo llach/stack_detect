@@ -2,6 +2,7 @@ import os
 import torch
 import numpy as np
 
+from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 
 from groundingdino.models import build_model
@@ -111,7 +112,7 @@ def get_grounding_output(model, image, caption, box_threshold, text_threshold=No
 
     return np.array(boxes_px), list(pred_phrases_sorted), list(confidences_sorted)
 
-def plot_boxes_to_image(image_pil, boxes, labels):
+def plot_boxes_to_image(image_pil, boxes, labels, more_points=[]):
     size = image_pil.size
     W, H = size
     
@@ -146,6 +147,18 @@ def plot_boxes_to_image(image_pil, boxes, labels):
         draw.text((center_x, center_y), str(i), fill="white", font=font)
 
         mask_draw.rectangle([x0, y0, x1, y1], fill=255, width=6)
+    
+    draw.text((5, 30), datetime.now().strftime('%H:%M:%S.%f')[:-3], fill="white")
+
+    for p,c in more_points:
+        r = 5  # radius in pixels
+        x, y = p
+
+        draw.ellipse(
+            (x - r, y - r, x + r, y + r),
+            fill=c,
+            outline=c
+        )
 
     return image_pil, mask
 

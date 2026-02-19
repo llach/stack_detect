@@ -234,129 +234,132 @@ class BagDetectNode(Node):
     # --- Trigger Service: main pipeline ------------------------
     # -----------------------------------------------------------
     def trigger_cb(self, request, response):
-        self.get_logger().info("new request!")
+        try:
+            self.get_logger().info("new request!")
 
-        if self.latest_rgb is None:
-            response.success = False
-            print("No RGB image received yet.")
+            if self.latest_rgb is None:
+                response.success = False
+                print("No RGB image received yet.")
+                return response
+
+            if self.latest_depth is None:
+                response.success = False
+                print("No depth image received yet.")
+                return response
+
+            if self.K is None:
+                response.success = False
+                print("No camera info received yet.")
+                return response
+
+            # --- Decode latest images ---
+            image_cv = self.bridge.compressed_imgmsg_to_cv2(self.latest_rgb)
+            depth_cv = self.bridge.imgmsg_to_cv2(self.latest_depth, desired_encoding="passthrough")
+            image_pil = Image.fromarray(cv2.cvtColor(image_cv, cv2.COLOR_BGR2RGB))
+
+            # --- DINO detection ---
+            boxes, labels, confidences = self.dino.predict(image_pil, "bag")
+            if len(boxes) == 0:
+                response.success = False
+                print("no boxes detected!")
+                return response
+
+            # --- Crop around best detection ---
+            best_box = expand_bounding_box(boxes[0], image_pil.width, image_pil.height, scale=1.15)
+            x0, y0, x1, y1 = best_box
+            cropped_cv = image_cv[y0:y1, x0:x1]
+
+            # --- Get bag orientation & offset point ---
+            angle, box, offset_point, contour, dbg_image = get_bag_pose_from_array(
+                cropped_cv, 
+                closing_kernel_size=25
+            )
+            box_global = box + np.array([x0, y0])
+            offset_global = (offset_point[0] + x0, offset_point[1] + y0)
+
+            ## APPLY OFFSET TO ANGLE 
+            if angle > 50:
+                angle -= 90
+
+            # --- Convert offset pixel → 3D point ---
+            point_3d = self.pixel_to_3d(offset_global, depth_cv, self.K)
+
+            # --- Draw visualization ---
+            vis = image_cv.copy()
+
+            # 1️⃣ Draw the expanded DINO bounding box
+            cv2.rectangle(
+                vis,
+                (int(x0), int(y0)),
+                (int(x1), int(y1)),
+                (0, 255, 0), 2
+            )
+            cv2.putText(vis, "Expanded DINO BB", (x0, max(0, y0 - 10)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+            # 2️⃣ Draw the detected contour (adjusted to global coordinates)
+            if contour is not None and len(contour) > 0:
+                contour_global = contour + np.array([[x0, y0]])
+                cv2.drawContours(vis, [contour_global.astype(int)], -1, (255, 0, 0), 2)
+                cv2.putText(vis, "Contour", (int(contour_global[0][0][0]), int(contour_global[0][0][1]) - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+
+            # 3️⃣ Draw the rotated rectangle (bag pose box)
+            cv2.drawContours(vis, [box_global.astype(int)], 0, (0, 0, 255), 2)
+            cv2.putText(vis, datetime.now().strftime('%H:%M:%S.%f')[:-3], (5, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+
+            # 4️⃣ Draw the offset point + angle text
+            cv2.circle(vis, offset_global, 6, (0, 255, 255), -1)
+            cv2.putText(vis, f"{angle:.2f}deg", (int(offset_global[0]) + 10, int(offset_global[1])),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+
+            # --- Publish annotated images ---
+            img_msg = self.bridge.cv2_to_compressed_imgmsg(vis)
+            self.img_pub.publish(img_msg)
+
+            self.dbg_img_pub.publish(self.bridge.cv2_to_compressed_imgmsg(dbg_image))
+
+            # --- Compose pose in camera_link ---
+            pose_cam = PoseStamped()
+            pose_cam.header.stamp = self.get_clock().now().to_msg()
+            pose_cam.header.frame_id = "right_arm_l515_color_optical_frame"
+            pose_cam.pose.position.x = float(point_3d.point.x)
+            pose_cam.pose.position.y = float(point_3d.point.y)
+            pose_cam.pose.position.z = float(point_3d.point.z)
+            pose_cam.pose.orientation.w = 1.0
+
+            # --- Transform to map frame ---
+            pose_map = self.get_bag_pose_in_map(pose_cam)
+            if not pose_map:
+                print("tf error")
+                response.success = False
+                return response
+
+            offset = request.offset or Point(x=0.0, y=0.0, z=0.0)
+            pose_map.pose.orientation = rpy_to_quat(0,0,np.deg2rad(-angle))
+            pose_map_offset = offset_pose_local(pose_map, dx=offset.x, dy=offset.y)
+
+            self.bag_pose_pub.publish(pose_map_offset)
+
+            wrist_pose_in_map = self.get_left_wrist_pose(angle)
+            wrist_pose_in_map.pose.position.x = pose_map_offset.pose.position.x
+            wrist_pose_in_map.pose.position.y = pose_map_offset.pose.position.y
+            wrist_pose_in_map.pose.position.z = offset.z
+
+            wrist_pose_in_map.header.stamp.sec = 0
+            wrist_pose_in_map.header.stamp.nanosec = 0
+            wrist_pose_in_wrist = self.tf_buffer.transform(wrist_pose_in_map, "left_arm_wrist_3_link")
+
+            self.wrist_pose_pub.publish(wrist_pose_in_wrist)
+
+            response.success = True
+            response.target_pose = wrist_pose_in_wrist
+
+            self.get_logger().info(f"Bag detected. Angle={angle:.2f}°, MapPose=({pose_map.pose.position.x:.3f}, {pose_map.pose.position.y:.3f}, {pose_map.pose.position.z:.3f})")
             return response
-
-        if self.latest_depth is None:
-            response.success = False
-            print("No depth image received yet.")
+        except:
+            print("DINO DIDN'T WORK!!!!")
             return response
-
-        if self.K is None:
-            response.success = False
-            print("No camera info received yet.")
-            return response
-
-        # --- Decode latest images ---
-        image_cv = self.bridge.compressed_imgmsg_to_cv2(self.latest_rgb)
-        depth_cv = self.bridge.imgmsg_to_cv2(self.latest_depth, desired_encoding="passthrough")
-        image_pil = Image.fromarray(cv2.cvtColor(image_cv, cv2.COLOR_BGR2RGB))
-
-        # --- DINO detection ---
-        boxes, labels, confidences = self.dino.predict(image_pil, "bag")
-        if len(boxes) == 0:
-            response.success = False
-            print("no boxes detected!")
-            return response
-
-        # --- Crop around best detection ---
-        best_box = expand_bounding_box(boxes[0], image_pil.width, image_pil.height, scale=1.15)
-        x0, y0, x1, y1 = best_box
-        cropped_cv = image_cv[y0:y1, x0:x1]
-
-        # --- Get bag orientation & offset point ---
-        angle, box, offset_point, contour, dbg_image = get_bag_pose_from_array(
-            cropped_cv, 
-            closing_kernel_size=25
-        )
-        box_global = box + np.array([x0, y0])
-        offset_global = (offset_point[0] + x0, offset_point[1] + y0)
-
-        ## APPLY OFFSET TO ANGLE 
-        if angle > 50:
-            angle -= 90
-
-        # --- Convert offset pixel → 3D point ---
-        point_3d = self.pixel_to_3d(offset_global, depth_cv, self.K)
-
-        # --- Draw visualization ---
-        vis = image_cv.copy()
-
-        # 1️⃣ Draw the expanded DINO bounding box
-        cv2.rectangle(
-            vis,
-            (int(x0), int(y0)),
-            (int(x1), int(y1)),
-            (0, 255, 0), 2
-        )
-        cv2.putText(vis, "Expanded DINO BB", (x0, max(0, y0 - 10)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-
-        # 2️⃣ Draw the detected contour (adjusted to global coordinates)
-        if contour is not None and len(contour) > 0:
-            contour_global = contour + np.array([[x0, y0]])
-            cv2.drawContours(vis, [contour_global.astype(int)], -1, (255, 0, 0), 2)
-            cv2.putText(vis, "Contour", (int(contour_global[0][0][0]), int(contour_global[0][0][1]) - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
-
-        # 3️⃣ Draw the rotated rectangle (bag pose box)
-        cv2.drawContours(vis, [box_global.astype(int)], 0, (0, 0, 255), 2)
-        cv2.putText(vis, datetime.now().strftime('%H:%M:%S.%f')[:-3], (5, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-
-        # 4️⃣ Draw the offset point + angle text
-        cv2.circle(vis, offset_global, 6, (0, 255, 255), -1)
-        cv2.putText(vis, f"{angle:.2f}°", (int(offset_global[0]) + 10, int(offset_global[1])),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-
-        # --- Publish annotated images ---
-        img_msg = self.bridge.cv2_to_compressed_imgmsg(vis)
-        self.img_pub.publish(img_msg)
-
-        self.dbg_img_pub.publish(self.bridge.cv2_to_compressed_imgmsg(dbg_image))
-
-        # --- Compose pose in camera_link ---
-        pose_cam = PoseStamped()
-        pose_cam.header.stamp = self.get_clock().now().to_msg()
-        pose_cam.header.frame_id = "right_arm_l515_color_optical_frame"
-        pose_cam.pose.position.x = float(point_3d.point.x)
-        pose_cam.pose.position.y = float(point_3d.point.y)
-        pose_cam.pose.position.z = float(point_3d.point.z)
-        pose_cam.pose.orientation.w = 1.0
-
-        # --- Transform to map frame ---
-        pose_map = self.get_bag_pose_in_map(pose_cam)
-        if not pose_map:
-            print("tf error")
-            response.success = False
-            return response
-
-        offset = request.offset or Point(x=0.0, y=0.0, z=0.0)
-        pose_map.pose.orientation = rpy_to_quat(0,0,np.deg2rad(-angle))
-        pose_map_offset = offset_pose_local(pose_map, dx=offset.x, dy=offset.y)
-
-        self.bag_pose_pub.publish(pose_map_offset)
-
-        wrist_pose_in_map = self.get_left_wrist_pose(angle)
-        wrist_pose_in_map.pose.position.x = pose_map_offset.pose.position.x
-        wrist_pose_in_map.pose.position.y = pose_map_offset.pose.position.y
-        wrist_pose_in_map.pose.position.z = offset.z
-
-        wrist_pose_in_map.header.stamp.sec = 0
-        wrist_pose_in_map.header.stamp.nanosec = 0
-        wrist_pose_in_wrist = self.tf_buffer.transform(wrist_pose_in_map, "left_arm_wrist_3_link")
-
-        self.wrist_pose_pub.publish(wrist_pose_in_wrist)
-
-        response.success = True
-        response.target_pose = wrist_pose_in_wrist
-
-        self.get_logger().info(f"Bag detected. Angle={angle:.2f}°, MapPose=({pose_map.pose.position.x:.3f}, {pose_map.pose.position.y:.3f}, {pose_map.pose.position.z:.3f})")
-        return response
-
 
 def main(args=None):
     rclpy.init(args=args)
