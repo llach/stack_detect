@@ -164,6 +164,18 @@ class MotionHelperV2(Node):
 
         print("setup done!")
 
+    def reset_tf(self):
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+
+        print("waiting for tfs")
+        while not (
+            self.tf_buffer.can_transform("map", "right_finger", rclpy.time.Time()) and
+            self.tf_buffer.can_transform("world", "right_arm_wrist_3_link", rclpy.time.Time())
+        ):
+            time.sleep(0.05)
+            rclpy.spin_once(self)
+
     def js_callback(self, msg):
         self.current_q = {jname: q for jname, q in zip(msg.name, msg.position)}
         self.latest_js_time = time.time()
@@ -320,8 +332,6 @@ class MotionHelperV2(Node):
 
             req.ik_request = ik_req
 
-            print(ik_req)
-
             fut = self.ik_client.call_async(req)
             rclpy.spin_until_future_complete(self, fut)
             res = fut.result()
@@ -354,73 +364,6 @@ class MotionHelperV2(Node):
         for _ in range(int(sec/0.1)):
             time.sleep(0.1)
             rclpy.spin_once(self)
-
-    def descend_until_force_step(
-        self,
-        force_goal: float,
-        delta_z: float,
-        traj_time: float,
-        max_dist: float,
-        side: str = "left",
-    ):
-        """
-        Moves down in -Z until |Fz - Fz_ref| >= force_goal
-        or max_dist is reached.
-
-        Returns:
-            True  -> force change detected
-            False -> max distance reached without contact
-        """
-
-        # ----- Ensure fresh F/T data -----
-        while rclpy.ok() and not self.has_fresh_ft():
-            rclpy.spin_once(self, timeout_sec=0.1)
-
-        fz_ref = self.get_fz()
-        if fz_ref is None:
-            self.get_logger().error("No initial Fz available")
-            return False
-
-        self.get_logger().info(
-            f"Starting force descent, Fz_ref = {fz_ref:.2f} N"
-        )
-
-        steps = int(abs(max_dist / delta_z))
-        moved_dist = 0.0
-
-        for i in range(steps):
-
-            if not self.has_fresh_ft():
-                self.get_logger().warn("F/T data not fresh, waiting...")
-                self.ros_sleep(0.05)
-                continue
-
-            fz = self.get_fz()
-            if fz is None:
-                continue
-
-            # ----- Relative force condition -----
-            if abs(fz - fz_ref) >= force_goal:
-                self.get_logger().info(
-                    f"Force change detected: "
-                    f"|{fz:.2f} - {fz_ref:.2f}| >= {force_goal}"
-                )
-                return True
-
-            # ----- Move down -----
-            self.move_rel_wrist(
-                z=-delta_z,
-                time=traj_time,
-                side=side
-            )
-
-            moved_dist += abs(delta_z)
-
-        self.get_logger().info(
-            "Max descent reached without detecting force change"
-        )
-        return False
-    
 
     def finger_to_wrist(self, finger_pose_map, side="left"):
         """
@@ -534,6 +477,7 @@ class MotionHelperV2(Node):
 
     def build_cartesian_down_traj(self, dist: float, traj_time: float, side: str):
         # Current EE pose in map frame
+        self.reset_tf()
         tf = self.tf_buffer.lookup_transform(
             "map",
             f"{side}_arm_wrist_3_link",

@@ -186,34 +186,127 @@ YOLO_START_Q = [
     0.6136,
 ]
 
+LEFT_TRANS = [
+    0.9616,
+    -1.8451,
+    -1.8693,
+    -1.9008,
+    -1.0364,
+    2.4538,
+]
+
+LEFT_ROT = [
+    0.9616,
+    -1.8451,
+    -1.8693,
+    -1.9008,
+    -1.0364,
+    3.2646,
+]
+
+RIGHT_TRANS = [
+    -0.8900,
+    -1.1016,
+    1.7613,
+    -1.3917,
+    1.1042,
+    1.4001,
+]
+
+RIGHT_ROT = [
+    -0.8900,
+    -1.1016,
+    1.7613,
+    -1.3916,
+    1.1042,
+    0.5489,
+]
+
+
 from stack_approach.helpers import transform_to_pose_stamped
 from stack_msgs.srv import MoveArm, RollerGripper, RollerGripperV2
 
 if __name__ == '__main__':
     rclpy.init()
 
+    prim_time = 6
     mh2 = MotionHelperV2()
 
-    pub = mh2.create_publisher(PoseStamped, '/unstack_start_pose', 10)
+    mh2.call_cli_sync(mh2.finger2srv["left_v2"], RollerGripperV2.Request(position=1.0))
+    mh2.call_cli_sync(mh2.finger2srv["right_v2"], RollerGripperV2.Request(position=1.0))
 
-    time.sleep(2)
-    print("LETS GOOOOOO")
-
-    msg = transform_to_pose_stamped(mh2.tf_buffer.lookup_transform("map", f"right_arm_wrist_3_link", rclpy.time.Time()))
-
-    print(msg)
-
-    msg.pose.orientation = Quaternion(
-        x=YOLO_ROT_RIGHT[0],
-        y=YOLO_ROT_RIGHT[1],
-        z=YOLO_ROT_RIGHT[2],
-        w=YOLO_ROT_RIGHT[3],
+    input("inp")
+    mh2.go_to_q(
+        q = DINOV3_END_Q,
+        time = 5,
+        side = "both"
     )
 
-    q = mh2.compute_ik_with_retries(msg, mh2.current_q.copy(), side="right")
-    print(q)
+    input("inp")
+    mh2.call_cli_sync(mh2.finger2srv["right_v2"], RollerGripperV2.Request(position=-1.0))
+    time.sleep(0.5)
 
-    exit(0)
+    mh2.go_to_q(
+        q = LEFT_TRANS,
+        time = prim_time,
+        side = "left"
+    )
+
+    mh2.go_to_q(
+        q = LEFT_ROT,
+        time = prim_time,
+        side = "left"
+    )
+
+    mh2.call_cli_sync(mh2.finger2srv["left_v2"], RollerGripperV2.Request(position=-1.0))
+    time.sleep(0.2)
+    mh2.call_cli_sync(mh2.finger2srv["right_v2"], RollerGripperV2.Request(position=1.0))
+    time.sleep(0.5)
+
+    mh2.go_to_q(
+        q=RIGHT_TRANS,
+        time = prim_time,
+        side="right"
+    )
+
+    mh2.go_to_q(
+        q=RIGHT_ROT,
+        time = prim_time,
+        side="right"
+    )
+
+    mh2.call_cli_sync(mh2.finger2srv["right_v2"], RollerGripperV2.Request(position=-1.0))
+    time.sleep(0.7)
+
+    input("yolo")
+    mh2.go_to_q(
+        q = YOLO_START_Q,
+        time = 10,
+        side = "both"
+    )
+
+
+
+    # pub = mh2.create_publisher(PoseStamped, '/unstack_start_pose', 10)
+
+    # time.sleep(2)
+    # print("LETS GOOOOOO")
+
+    # msg = transform_to_pose_stamped(mh2.tf_buffer.lookup_transform("map", f"right_arm_wrist_3_link", rclpy.time.Time()))
+
+    # print(msg)
+
+    # msg.pose.orientation = Quaternion(
+    #     x=YOLO_ROT_RIGHT[0],
+    #     y=YOLO_ROT_RIGHT[1],
+    #     z=YOLO_ROT_RIGHT[2],
+    #     w=YOLO_ROT_RIGHT[3],
+    # )
+
+    # q = mh2.compute_ik_with_retries(msg, mh2.current_q.copy(), side="right")
+    # print(q)
+
+    # exit(0)
 
     # mh2.go_to_q(
     #     q = DINOV3_END_Q,
@@ -224,8 +317,8 @@ if __name__ == '__main__':
     # input("inp")
     # mh2.call_cli_sync(mh2.finger2srv["right_v2"], RollerGripperV2.Request(position=-1.0))
 
-    input("inp")
-    mh2.call_cli_sync(mh2.finger2srv["left_v2"], RollerGripperV2.Request(position=0.2))
+    # input("inp")
+    # mh2.call_cli_sync(mh2.finger2srv["left_v2"], RollerGripperV2.Request(position=0.2))
 
 
 

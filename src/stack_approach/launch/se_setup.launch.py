@@ -80,7 +80,6 @@ def generate_launch_description():
         SetEnvironmentVariable(name='PORT', value=LaunchConfiguration('port'))
     )
 
-
     nodes_to_start.append(
         Node(
             package='softenable_display',

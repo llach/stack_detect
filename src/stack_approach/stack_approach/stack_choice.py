@@ -122,6 +122,9 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 from geometry_msgs.msg import PoseStamped
 
+from softenable_display_msgs.srv import SetDisplay
+from std_srvs.srv import Trigger
+
 def rotate_about_child_x_toward_line(
     pose: PoseStamped,
     pose_a: PoseStamped,
@@ -290,9 +293,10 @@ def get_box_click_cv2(image_pil, boxes_px):
 
 class StackDetectorDINO(Node):
 
-    def __init__(self):
+    def __init__(self, with_slides: bool = False):
         super().__init__("StackDetectorDINO")
         self.log = self.get_logger()
+        self.with_slides = with_slides
 
         self.bridge = CvBridge()
         self.cb_group = ReentrantCallbackGroup()
@@ -348,6 +352,21 @@ class StackDetectorDINO(Node):
         while not self.sam_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info('SAM service not available, waiting again...')
 
+        if with_slides:
+            self.cli_display = self.create_client(SetDisplay, '/set_display')
+            self.cli_start_switch = self.create_client(Trigger, "start_switch")
+            self.cli_kill_switch = self.create_client(Trigger, "kill_switch")
+
+            while not self.cli_display.wait_for_service(timeout_sec=1.0):
+                self.get_logger().info('Waiting for /set_display service...')
+
+    def switch_slide(self, slide_name):
+        if not self.with_slides:
+            print("NOT switching slides!")
+            return
+        
+        print(f"switching to slide {slide_name}")
+        self.cli_display.call_async(SetDisplay.Request(name=slide_name))
 
     def rgb_cb(self, msg: CompressedImage):
         try:
@@ -622,8 +641,6 @@ def start_pose_and_stack_choice(node: StackDetectorDINO):
     for _ in range(5):
         rclpy.spin_once(node, timeout_sec=0.1)
 
-    print(pose)
-
     return pose
 
 
@@ -674,40 +691,41 @@ def apply_local_offset(base_pose_stamped, trans_offset=[0.0, 0.0, 0.0], rot_offs
     return new_pose
 
 def unstack(mh2: MotionHelperV2, node, dist_off=-0.05, height_off=0.021, prim_angle=45):
-    fut = node.sam_client.call_async(StackDetect.Request())
-    rclpy.spin_until_future_complete(node, fut)
+    for _ in range(10):
+        fut = node.sam_client.call_async(StackDetect.Request())
+        rclpy.spin_until_future_complete(node, fut)
 
-    mh2.call_cli_sync(mh2.finger2srv["right_v2"], RollerGripperV2.Request(position=1.0))
+        mh2.call_cli_sync(mh2.finger2srv["right_v2"], RollerGripperV2.Request(position=1.0))
 
-    stack_pose__cam = fut.result().target_pose
-    stack_pose__cam.header.stamp.sec = 0
-    stack_pose__cam.header.stamp.nanosec = 0
+        stack_pose__cam = fut.result().target_pose
+        stack_pose__cam.header.stamp.sec = 0
+        stack_pose__cam.header.stamp.nanosec = 0
 
-    finger__map = transform_to_pose_stamped(node.tf_buffer.lookup_transform("map", "right_finger", rclpy.time.Time()))
+        finger__map = transform_to_pose_stamped(node.tf_buffer.lookup_transform("map", "right_finger", rclpy.time.Time()))
 
-    stack_pose__map = node.tf_buffer.transform(stack_pose__cam, "map")
-    stack_pose__map.pose.orientation = finger__map.pose.orientation
+        stack_pose__map = node.tf_buffer.transform(stack_pose__cam, "map")
+        stack_pose__map.pose.orientation = finger__map.pose.orientation
 
-    poses = []
-    for dd, dh in [
-        [-0.05, 0.021],     # start
-        [-0.02, 0.008],     # pre-stack
-        [0.015, 0.008],     # insert
-        [0.015, 0.015],     # lift
-        [0.040, 0.015],     # further insertion
-        [-0.02, 0.015],     # pull out
-    ]:
-        p = apply_local_offset(stack_pose__map, trans_offset=[dh, 0, dd], rot_offset_deg=[0,-prim_angle,0])
-        poses.append(mh2.finger_to_wrist(p, "right"))
+        poses = []
+        for dd, dh in [
+            [-0.05, 0.021],     # start
+            [-0.02, 0.008],     # pre-stack
+            [0.015, 0.008],     # insert
+            [0.015, 0.015],     # lift
+            [0.040, 0.015],     # further insertion
+            [-0.02, 0.015],     # pull out
+        ]:
+            p = apply_local_offset(stack_pose__map, trans_offset=[dh, 0, dd], rot_offset_deg=[0,-prim_angle,0])
+            poses.append(mh2.finger_to_wrist(p, "right"))
 
-    node.stack_pose_pub.publish(PoseArray(header=stack_pose__map.header, poses=[stack_pose__map.pose]+[p.pose for p in poses]))
-
-    if input("continue?").strip().lower() != "y": exit(0)
+        node.stack_pose_pub.publish(PoseArray(header=stack_pose__map.header, poses=[stack_pose__map.pose]+[p.pose for p in poses]))
+        print("done ...")
+        if input("continue? (y/N)").strip().lower() == "y": break
 
     for i, (p, t) in enumerate(zip(poses, [
-        3,     # start
-        1,     # pre-stack
-        1,     # insert
+        3,      # start
+        1,      # pre-stack
+        1,      # insert
         .5,     # lift
         .5,     # further insertion
         .5,     # pull out
@@ -733,7 +751,7 @@ def placing_sequence(mh2: MotionHelperV2):
     mh2.go_to_q([-0.731177,-1.07293,1.9299,-1.88504,0.999185,3.78101], side="right", time=0.5) # 0.5
 
     mh2.call_cli_sync(mh2.finger2srv["right_v2"], RollerGripperV2.Request(position=1.0))
-    time.sleep(0.3)
+    time.sleep(0.45)
     
     mh2.go_to_q([-0.679236,-1.10291,1.97395,-1.87112,1.0267,3.72891], side="right", time=0.25)
     mh2.go_to_q([-0.740686,-1.06235,2.12228,-2.09265,0.994247,3.7895], side="right", time=0.4)
@@ -752,60 +770,162 @@ STACK_CHOICE_START = [
     2.9875,
 ]
 
+"""
+STACK_CHOICE_START_BOTH 
+# Current joint positions for: both [rad]
+[
+    1.3931,
+    -1.8583,
+    -2.0507,
+    -0.9805,
+    -0.7861,
+    0.4594,
+    -1.6868,
+    -0.3205,
+    1.0471,
+    -2.9534,
+    2.2410,
+    2.9875,
+]
+"""
+
 PRE_STACK_START = [
-    -2.4860,
-    -1.8322,
-    2.1434,
-    -1.7947,
-    2.5562,
-    4.0280,
+    -2.2036,
+    -1.5719,
+    2.0296,
+    -1.9163,
+    2.4260,
+    3.8685,
+]
+"""
+PRE_STACK_START_BOTH
+# Current joint positions for: both [rad]
+[
+    1.3931,
+    -1.8583,
+    -2.0507,
+    -0.9805,
+    -0.7862,
+    0.4593,
+    -2.2035,
+    -1.5719,
+    2.0296,
+    -1.9162,
+    2.4260,
+    3.8685,
 ]
 
-if __name__ == '__main__':
-    rclpy.init()
+"""
 
+SAFE_TRANSITION = [
+    -1.7321,
+    -0.7593,
+    1.7561,
+    -2.5065,
+    1.0454,
+    3.0375,
+]
+
+"""
+SAFE_TRANSITION_BOTH
+# Current joint positions for: both [rad]
+[
+    1.3878,
+    -1.8531,
+    -2.0427,
+    -0.9775,
+    -0.7938,
+    0.4604,
+    -1.7322,
+    -0.7593,
+    1.7561,
+    -2.5064,
+    1.0453,
+    3.0375,
+]
+
+
+"""
+
+def main(mh2: MotionHelperV2, node: StackDetectorDINO, with_slides=False):
     side = "right"
-    traj_time = 6
-    mh2 = MotionHelperV2()
-    node = StackDetectorDINO()
+    input("start?")
 
-    node.stack_pose_pub.publish(PoseArray(poses=[]))
-    for _ in range(5):
-        rclpy.spin_once(node, timeout_sec=0.1)
-
-    if input("start?").strip().lower() != "y": exit(0)
+    if with_slides: 
+        fut = node.cli_start_switch.call_async(Trigger.Request())
+        rclpy.spin_until_future_complete(node, fut)
 
     mh2.go_to_q(
-        q=STACK_CHOICE_START,
+        q=SAFE_TRANSITION,
         time=3,
         side="right"
     )
 
-    pre_stack_pose = start_pose_and_stack_choice(node)
-    pre_stack_q = mh2.compute_ik_with_retries(pre_stack_pose, mh2.current_q.copy(), side)
-    
-    if input("move?").strip().lower() != "y": exit(0)
-    mh2.go_to_q(pre_stack_q, traj_time, side="right")
-    time.sleep(0.5)
+    if with_slides:
+        pre_stack_q = PRE_STACK_START
+        mh2.go_to_q(
+            q=PRE_STACK_START,
+            time=3,
+            side="right"
+        )
+    else:
+        mh2.go_to_q(
+            q=STACK_CHOICE_START,
+            time=2,
+            side="right"
+        )
 
-    # mh2.go_to_q(
-    #     q=PRE_STACK_START,
-    #     time=7,
-    #     side="right"
-    # )
-    # pre_stack_pose = PRE_STACK_START
+        for _ in range(10):
+            try:
+                pre_stack_pose = start_pose_and_stack_choice(node)
+                pre_stack_q = mh2.compute_ik_with_retries(pre_stack_pose, mh2.current_q.copy(), side)
+                if not pre_stack_q:
+                    print("IK FAILED")
+                    continue
+                break
+            except Exception as e:
+                print("Exception during unstacking pose ")
+
+        input("move?")
+        mh2.go_to_q(pre_stack_q, 3, side="right")
 
     print("RUNNING UNSTACKING!")
+    time.sleep(0.7) # otherwise we might take the image too early
     unstack(mh2, node)
     print("unstacking done.")
 
     mh2.go_to_q(
         q=pre_stack_q,
-        time=traj_time,
+        time=2.5,
         side="right"
     )
 
-    if input("place?").strip().lower() != "y": exit(0)
+    if not with_slides: input("place?")
     placing_sequence(mh2)
    
-    rclpy.shutdown()
+
+if __name__ == '__main__':
+    import sys
+
+    rclpy.init()
+    last_arg = sys.argv[-1]
+    with_slides = last_arg == "slides"
+
+    mh2 = MotionHelperV2()
+    node = StackDetectorDINO(with_slides=with_slides)
+
+    node.cli_kill_switch.call_async(Trigger.Request())
+
+    try:
+        # 3. Run your main logic
+        main(mh2=mh2, node=node, with_slides=with_slides)
+    except KeyboardInterrupt:
+        print("\n[Ctrl+C] detected, shutting down...")
+        node.cli_kill_switch.call_async(Trigger.Request())
+    except Exception as e:
+        print(f"Unstacking Exception:\n{e}")
+        node.cli_kill_switch.call_async(Trigger.Request())
+    finally:
+        # 4. Clean shutdown
+        rclpy.shutdown()
+    print("bye!")

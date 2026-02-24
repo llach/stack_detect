@@ -20,6 +20,12 @@ from geometry_msgs.msg import Point
 from stack_approach.helpers import empty_pose
 from geometry_msgs.msg import WrenchStamped
 
+from .motion_helper_v2 import MotionHelperV2
+
+class BagType:
+    NORMAL="normal"
+    THIN="thin"
+
 move_groups = [
     "both",
     "both",
@@ -75,11 +81,12 @@ def adjust_ts(ts, scaling=1, offset=0):
     return ((ts - ts[0]) * scaling ) + offset
 
 class TrajectoryPublisher(Node):
-    def __init__(self):
+    def __init__(self, with_slides = False):
         super().__init__('bag_opening_perc')
 
-        self.recbg = ReentrantCallbackGroup()
+        self.with_slides = with_slides
 
+        self.recbg = ReentrantCallbackGroup()
         self.controller_switcher = ControllerSwitcher()
 
         # self.cli_display = self.create_client(SetDisplay, '/set_display')
@@ -129,12 +136,17 @@ class TrajectoryPublisher(Node):
             10
         )
 
-        # for k, v in self.finger2srv.items():
-        #     print(f"waiting for {k.upper()} gripper srv")
-        #     while not v.wait_for_service(timeout_sec=2.0):
-        #         self.get_logger().info('service not available, waiting again...')
-        #     print(f"found {k.upper()} gripper srv")
+        for k, v in self.finger2srv.items():
+            print(f"waiting for {k.upper()} gripper srv")
+            while not v.wait_for_service(timeout_sec=2.0):
+                self.get_logger().info('service not available, waiting again...')
+            print(f"found {k.upper()} gripper srv")
 
+
+        if with_slides:
+            self.cli_display = self.create_client(SetDisplay, '/set_display')
+            while not self.cli_display.wait_for_service(timeout_sec=1.0):
+                self.get_logger().info('Waiting for /set_display service...')
 
         self.move_cli = self.create_client(MoveArm, "move_arm", callback_group=self.recbg)
         while not self.move_cli.wait_for_service(timeout_sec=1.0):
@@ -144,6 +156,14 @@ class TrajectoryPublisher(Node):
         self.bag_cli = self.create_client(StackDetect, "detect_bag", callback_group=self.recbg)
         while not self.bag_cli.wait_for_service(timeout_sec=1.0):
             self.get_logger().info('bag detect service not available, waiting again...')
+
+    def switch_slide(self, slide_name):
+        if not self.with_slides:
+            print("NOT switching slides!")
+            return
+        
+        print(f"switching to slide {slide_name}")
+        self.cli_display.call_async(SetDisplay.Request(name=slide_name))
 
     def has_fresh_ft(self):
         if self.latest_ft is None or self.latest_ft_time is None:
@@ -332,10 +352,20 @@ def move_over_bag(node, left_wrist_pose):
         )
     await_action_future(node, fut)
 
-def execute_opening(node, trajs):
+def execute_opening(mh2: MotionHelperV2, node: TrajectoryPublisher, trajs, bag_type: BagType, with_slides: bool = False):
 
-    PRE_GRASP_HEIGHT = 0.837
-    GRASP_HEIGHT = 0.790
+    PRE_GRASP_HEIGHT = 0.837 # 0.837
+
+    if bag_type == BagType.NORMAL:
+        GRASP_HEIGHT = 0.791 # normal bags
+        TARGET_FORCE = 20
+        Y_OFFSET = 0.01
+        ROLL_TIME_LEFT = 3.5
+    elif bag_type == BagType.THIN:
+        GRASP_HEIGHT = 0.793
+        TARGET_FORCE = 14
+        Y_OFFSET = 0.013
+        ROLL_TIME_LEFT = 5.0
 
     node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=1650))
     node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=2950))
@@ -345,8 +375,8 @@ def execute_opening(node, trajs):
         print("calling bag_cli")
         fut = node.bag_cli.call_async(StackDetect.Request(
                 offset = Point(
-                    x=0.03, 
-                    y=0.01,
+                    x=0.03, # where on the edge? larger x means aways from the robot 
+                    y=Y_OFFSET, # how much onto the bag?
                     z=PRE_GRASP_HEIGHT
                 )
             )
@@ -368,7 +398,9 @@ def execute_opening(node, trajs):
     
     move_over_bag(node, bag_pose_wrist)
 
-    # input("go down?")
+    # input("down?")
+    # mh2.move_along_z_until_force_traj(force_goal=TARGET_FORCE, traj_time=3, dist=-0.046, side="left")
+
     grasp_pose = empty_pose(frame="left_arm_wrist_3_link")
     grasp_pose.pose.position.z = PRE_GRASP_HEIGHT - GRASP_HEIGHT
 
@@ -382,8 +414,9 @@ def execute_opening(node, trajs):
     ))
     rclpy.spin_until_future_complete(node, fut)
 
-    node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(roller_vel=80, roller_duration=3.5))
+    node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(roller_vel=80, roller_duration=ROLL_TIME_LEFT)) # 3.5
     node.call_cli_sync(node.finger2srv["left_v2"], RollerGripperV2.Request(position=-1.0))
+    time.sleep(0.5)
 
     grasp_pose_up = empty_pose(frame="left_arm_wrist_3_link")
     grasp_pose_up.pose.position.z = -0.02
@@ -398,6 +431,7 @@ def execute_opening(node, trajs):
     ))
     rclpy.spin_until_future_complete(node, fut)
 
+    print("going to pre-contact!")
     # got to pre contact pose
     fut = node.execute_traj(
             "both", 
@@ -411,13 +445,23 @@ def execute_opening(node, trajs):
         )
     await_action_future(node, fut)
 
+    # return
+    print("executing trajectories ...")
     execute_trajectories(node, trajs)
-    time.sleep(1.5)
 
+    time.sleep(.7)
+    if with_slides: node.switch_slide("protocol_bag_2")
+    
     print("waiting for force!")
     node.wait_for_force_change(0.55)
+
     print("FORCE CHANGE")
-    time.sleep(1.5)
+    if with_slides:
+        time.sleep(2)
+        node.switch_slide("protocol_bag_3")
+        time.sleep(3.5)
+    else:
+        time.sleep(2)
 
     node.call_cli_sync(node.finger2srv["right_v2"], RollerGripperV2.Request(position=1.0))
     time.sleep(0.2)
@@ -513,35 +557,46 @@ PLACE_LEFT = [
     -4.5638,
 ]
 
-
 def main(args=None):
     arrays = load_trajectories(f"/home/ros/ws/src/bag_opening/trajectories/")
     # arrays = load_trajectories(f"{os.environ['HOME']}/projects/se_clinic_case/ros_modules/bag_opening/trajectories/")
 
     rclpy.init(args=args)
-    node = TrajectoryPublisher()
-    
+    bag_type = BagType.NORMAL
+
     last_arg = sys.argv[-1]
+    with_slides = last_arg == "slides"
+
+    print("\n\n########### STARTING BAG OPENING WITH PERCEPTION DEMO ###########")
+    if with_slides:
+        print("\t\t!!!!! WITH SLIDES !!!!!")
+    print("\n\n")
+
+    mh2 = MotionHelperV2()
+    node = TrajectoryPublisher(with_slides=with_slides)
+   
+    if with_slides:
+        node.switch_slide("protocol_1")
+        node.initial_pose_new(dur=5)
 
     node.call_cli_sync(node.finger2srv["right_v2"], RollerGripperV2.Request(position=1.0))
     node.call_cli_sync(node.finger2srv["left_v2"], RollerGripperV2.Request(position=1.0))
 
-    node.initial_pose_new(dur=5)
+    while True:
+        try:
+            if input("init pose?").lower().strip() != "n": node.initial_pose_new(dur=3)
 
-    if "bag_opening_perc" in last_arg: # with "in", we catch execution with python and ros2 run
-        print("executing normally ...")
-        execute_opening(node, arrays)
-    elif last_arg == "slides":
-        print("executing with slides ...")
-        # node.cli_display.call_async(SetDisplay.Request(name="protocol_1"))
-        # time.sleep(10)
-        node.cli_display.call_async(SetDisplay.Request(name="protocol_bag_1"))
+            if with_slides: node.switch_slide("protocol_bag_1")
+            execute_opening(mh2, node, arrays, bag_type=bag_type, with_slides=with_slides)
 
-        execute_opening(node, arrays)
-        node.cli_display.call_async(SetDisplay.Request(name="protocol_bag_2"))
-        time.sleep(7)
-        node.cli_display.call_async(SetDisplay.Request(name="protocol_11"))
-
+            if with_slides:
+                time.sleep(1)
+                node.switch_slide("protocol_11")
+                node.initial_pose_new(dur=3)
+                break
+        except Exception as e:
+            print(f"Exection:\n{e}")
+            break
 
     node.destroy_node()
     rclpy.shutdown()
