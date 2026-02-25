@@ -708,9 +708,9 @@ def unstack(mh2: MotionHelperV2, node, dist_off=-0.05, height_off=0.021, prim_an
 
         poses = []
         for dd, dh in [
-            [-0.05, 0.021],     # start
-            [-0.02, 0.008],     # pre-stack
-            [0.015, 0.008],     # insert
+            [-0.06, 0.021],     # start
+            [-0.035, 0.004],    # pre-stack
+            [0.015, 0.004],    # insert
             [0.015, 0.015],     # lift
             [0.040, 0.015],     # further insertion
             [-0.02, 0.015],     # pull out
@@ -914,7 +914,7 @@ if __name__ == '__main__':
     mh2 = MotionHelperV2()
     node = StackDetectorDINO(with_slides=with_slides)
 
-    node.cli_kill_switch.call_async(Trigger.Request())
+    if with_slides: node.cli_kill_switch.call_async(Trigger.Request())
 
     try:
         # 3. Run your main logic

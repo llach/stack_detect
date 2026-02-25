@@ -357,10 +357,10 @@ def execute_opening(mh2: MotionHelperV2, node: TrajectoryPublisher, trajs, bag_t
     PRE_GRASP_HEIGHT = 0.837 # 0.837
 
     if bag_type == BagType.NORMAL:
-        GRASP_HEIGHT = 0.791 # normal bags
+        GRASP_HEIGHT = 0.79 # normal bags
         TARGET_FORCE = 20
-        Y_OFFSET = 0.01
-        ROLL_TIME_LEFT = 3.5
+        Y_OFFSET = 0.007
+        ROLL_TIME_LEFT = 4.5
     elif bag_type == BagType.THIN:
         GRASP_HEIGHT = 0.793
         TARGET_FORCE = 14
@@ -384,7 +384,7 @@ def execute_opening(mh2: MotionHelperV2, node: TrajectoryPublisher, trajs, bag_t
         rclpy.spin_until_future_complete(node, fut)
         res = fut.result()
 
-        inp = input("###################\n#######################\ngood?").lower().strip()
+        inp = input("################### move? (y/N)").lower().strip()
         if inp == "q":
             return
         elif inp == "y":
@@ -569,7 +569,8 @@ def main(args=None):
 
     print("\n\n########### STARTING BAG OPENING WITH PERCEPTION DEMO ###########")
     if with_slides:
-        print("\t\t!!!!! WITH SLIDES !!!!!")
+        print("\t\t!!!! WITH SLIDES !!!!")
+    print(f"\t\t.... {bag_type} ....")
     print("\n\n")
 
     mh2 = MotionHelperV2()
@@ -584,7 +585,7 @@ def main(args=None):
 
     while True:
         try:
-            if input("init pose?").lower().strip() != "n": node.initial_pose_new(dur=3)
+            if input("init pose? (Y/n)").lower().strip() != "n": node.initial_pose_new(dur=3)
 
             if with_slides: node.switch_slide("protocol_bag_1")
             execute_opening(mh2, node, arrays, bag_type=bag_type, with_slides=with_slides)
