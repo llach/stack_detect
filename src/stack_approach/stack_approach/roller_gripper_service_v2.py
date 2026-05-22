@@ -5,7 +5,7 @@ from rclpy.executors import MultiThreadedExecutor
 
 from dynamixel_sdk import PortHandler, PacketHandler, COMM_SUCCESS
 
-from stack_msgs.srv import RollerGripper, RollerGripperV2
+from stack_msgs.srv import RollerGripper, RollerGripperV2, GripperCurrent
 
 # Finger / roller ports
 CAMERA_FINGER_PORT = 1
@@ -16,6 +16,7 @@ NORMAL_FINGER_PORT = 4
 # Dynamixel addresses
 ADDR_TORQUE_ENABLE = 64
 ADDR_OPERATING_MODE = 11
+ADDR_GOAL_CURRENT = 102
 ADDR_GOAL_POSITION = 116
 ADDR_PRESENT_POSITION = 132
 ADDR_GOAL_VELOCITY = 104
@@ -28,6 +29,7 @@ BAUDRATE = 57600
 TICKS_PER_REV = 4096
 
 # operating mode constants
+CURRENT_BASED_POSITION_MODE = 5
 POSITION_MODE = 3
 VELOCITY_MODE = 1
 
@@ -127,8 +129,10 @@ class RollerGripperService(Node):
             raise RuntimeError("Failed to set baudrate")
 
         # Set operating modes
-        set_operating_mode(self.portHandler, self.packetHandler, [self.FINGER_PORT], POSITION_MODE)
+        set_operating_mode(self.portHandler, self.packetHandler, [self.FINGER_PORT], CURRENT_BASED_POSITION_MODE)
         set_operating_mode(self.portHandler, self.packetHandler, [self.ROLLER_PORT], VELOCITY_MODE)
+
+        dxl_write(self.packetHandler, self.portHandler, self.FINGER_PORT, ADDR_GOAL_CURRENT, 110, 2)
 
         # Enable torque
         set_torque(self.portHandler, self.packetHandler, [self.FINGER_PORT, self.ROLLER_PORT], True)
@@ -148,6 +152,12 @@ class RollerGripperService(Node):
             RollerGripperV2,
             f'{self.SRV_PREFIX}_gripper_normalized',
             self.normalized_callback
+        )
+
+        self.current_srv = self.create_service(
+            GripperCurrent,
+            f'{self.SRV_PREFIX}_gripper_current',
+            self.current_callback
         )
 
         self.get_logger().info("Dynamixel setup done!")
@@ -171,7 +181,7 @@ class RollerGripperService(Node):
         frist_pos = (self.max_pos_limit+self.min_pos_limit) // 2
         self.get_logger().info(f"Moving to FIRST position {frist_pos}")
         move_position(self.portHandler, self.packetHandler, self.FINGER_PORT, frist_pos)
-
+        time.sleep(1)  # David: Added to wait for the movement to finish before starting calibrating
         # ---- Determine closing direction ----
         # For right side motor, closing means decreasing ticks
         # For left side motor, closing means increasing ticks
@@ -186,6 +196,8 @@ class RollerGripperService(Node):
 
             # Clamp to motor range
             pos = max(self.min_pos_limit, min(self.max_pos_limit, pos))
+            # Instead of moving to the maximum position move what would be a halfway open position
+            # to reduce the mA when calibrating +-400
             move_position(self.portHandler, self.packetHandler, self.FINGER_PORT, pos)
 
             time.sleep(period)
@@ -299,6 +311,18 @@ class RollerGripperService(Node):
 
         except Exception as e:
             self.get_logger().error(f"Normalized command failed: {e}")
+            res.success = False
+
+        return res
+    
+    def current_callback(self, req, res):
+        try:
+            res.success = True
+            current = read_current_mA(self.portHandler, self.packetHandler, self.FINGER_PORT)
+            res.current = current
+
+        except Exception as e:
+            self.get_logger().error(f"Reading current command failed: {e}")
             res.success = False
 
         return res
