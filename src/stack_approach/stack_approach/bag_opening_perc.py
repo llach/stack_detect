@@ -139,7 +139,7 @@ class TrajectoryPublisher(Node):
         for k, v in self.finger2srv.items():
             print(f"waiting for {k.upper()} gripper srv")
             while not v.wait_for_service(timeout_sec=2.0):
-                self.get_logger().info('service not available, waiting again...')
+                self.get_logger().info(f'{k} service not available, waiting again...')
             print(f"found {k.upper()} gripper srv")
 
 
@@ -158,6 +158,7 @@ class TrajectoryPublisher(Node):
             self.get_logger().info('bag detect service not available, waiting again...')
 
     def switch_slide(self, slide_name):
+        return
         if not self.with_slides:
             print("NOT switching slides!")
             return
@@ -265,9 +266,7 @@ class TrajectoryPublisher(Node):
         fut = self.execute_traj(
             "both", 
             np.array([dur]), 
-            np.array([
-                [  1.39311028, -1.85827746, -2.0506866 , -0.98047812, -0.78614647, 0.45934969, -1.44216556, -0.68469267,  2.24536608, -3.02081587,  0.7967428 , -1.56835287 ] # bag in camera view
-            ])
+            np.array([START_POSE_SHIFTED_LEFT_STUDY])
         )
         await_action_future(self, fut)
     
@@ -313,12 +312,12 @@ def await_action_future(node, fut):
 
     return True
 
-def move_over_bag(node, left_wrist_pose):
+def move_over_bag(node, left_wrist_pose, execution_time=1.5):
     mar_left_pre = MoveArm.Request(
         target_pose = left_wrist_pose,
         execute = False,
         controller_name = "left_arm_joint_trajectory_controller",
-        execution_time = 1.5,
+        execution_time = float(execution_time),
         ik_link = "left_arm_wrist_3_link",
         name_target = ["left_arm_shoulder_pan_joint", "left_arm_shoulder_lift_joint", "left_arm_elbow_joint", "left_arm_wrist_1_joint", "left_arm_wrist_2_joint", "left_arm_wrist_3_joint"]
     )
@@ -356,27 +355,28 @@ def execute_opening(mh2: MotionHelperV2, node: TrajectoryPublisher, trajs, bag_t
 
     PRE_GRASP_HEIGHT = 0.837 # 0.837
 
+    X_OFFSET = 0.045      # before: 0.05
     if bag_type == BagType.NORMAL:
-        GRASP_HEIGHT = 0.79 # normal bags
+        GRASP_HEIGHT = 0.7917 # normal bags
         TARGET_FORCE = 20
-        Y_OFFSET = 0.007
+        Y_OFFSET = -0.04  # before: 0.007
         ROLL_TIME_LEFT = 4.5
     elif bag_type == BagType.THIN:
-        GRASP_HEIGHT = 0.793
+        GRASP_HEIGHT = 0.792
         TARGET_FORCE = 14
         Y_OFFSET = 0.013
         ROLL_TIME_LEFT = 5.0
 
-    node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=1650))
-    node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=2950))
+    # node.call_cli_sync(node.finger2srv["right"], RollerGripper.Request(finger_pos=1650))
+    # node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(finger_pos=2950))
 
     res = None
     while True:
         print("calling bag_cli")
         fut = node.bag_cli.call_async(StackDetect.Request(
                 offset = Point(
-                    x=0.03, # where on the edge? larger x means aways from the robot 
-                    y=Y_OFFSET, # how much onto the bag?
+                    x=X_OFFSET, # how much onto the bag? larger means further away from robot
+                    y=Y_OFFSET, # along short edge of bag
                     z=PRE_GRASP_HEIGHT
                 )
             )
@@ -395,8 +395,9 @@ def execute_opening(mh2: MotionHelperV2, node: TrajectoryPublisher, trajs, bag_t
         return
     
     bag_pose_wrist = res.target_pose
+    print(bag_pose_wrist)
     
-    move_over_bag(node, bag_pose_wrist)
+    move_over_bag(node, bag_pose_wrist, execution_time=5)   # 1.5
 
     # input("down?")
     # mh2.move_along_z_until_force_traj(force_goal=TARGET_FORCE, traj_time=3, dist=-0.046, side="left")
@@ -407,7 +408,7 @@ def execute_opening(mh2: MotionHelperV2, node: TrajectoryPublisher, trajs, bag_t
     fut = node.move_cli.call_async(MoveArm.Request(
         execute = True,
         target_pose = grasp_pose,
-        execution_time = 0.7,
+        execution_time = 1.7,   # 0.7
         controller_name = "left_arm_joint_trajectory_controller",
         ik_link = "left_arm_wrist_3_link",
         name_target = ["left_arm_shoulder_pan_joint", "left_arm_shoulder_lift_joint", "left_arm_elbow_joint", "left_arm_wrist_1_joint", "left_arm_wrist_2_joint", "left_arm_wrist_3_joint"]
@@ -431,12 +432,13 @@ def execute_opening(mh2: MotionHelperV2, node: TrajectoryPublisher, trajs, bag_t
     ))
     rclpy.spin_until_future_complete(node, fut)
 
+    # input("cont?")
     print("going to pre-contact!")
     # got to pre contact pose
     fut = node.execute_traj(
             "both", 
             np.array([
-                2.5
+                3.5 # 2.5
             ]), 
             np.array([
                 [1.56625366, -1.89681782, -2.23785257, -0.56585439,  0.59162313, -2.90597898,
@@ -449,11 +451,11 @@ def execute_opening(mh2: MotionHelperV2, node: TrajectoryPublisher, trajs, bag_t
     print("executing trajectories ...")
     execute_trajectories(node, trajs)
 
-    time.sleep(.7)
+    time.sleep(2.5)
     if with_slides: node.switch_slide("protocol_bag_2")
     
     print("waiting for force!")
-    node.wait_for_force_change(0.55)
+    node.wait_for_force_change(1.45)
 
     print("FORCE CHANGE")
     if with_slides:
@@ -484,29 +486,10 @@ def execute_opening(mh2: MotionHelperV2, node: TrajectoryPublisher, trajs, bag_t
 
 
 def execute_trajectories(node, arrays):
-    arrays.append({
-        "ts": np.array([2.5]),
-        "q": [
-            np.deg2rad([
-                74.16,
-                -112.87,
-                -94.81,
-                -33.03,
-                89.34,
-                -183.47,
-                -68.02,
-                -47.74,
-                62.89,
-                -324.02,
-                88.60,
-                32.82,
-            ])
-        ]
-    })
     
     offsets = [0 for _ in range(len(arrays))]
     offsets[0] = 10
-    offsets[-1] = 2.5
+    # offsets[-1] = 2.5
 
     # offsets[2] = 10
     # offsets[4] = 10
@@ -530,15 +513,32 @@ def execute_trajectories(node, arrays):
            if not await_action_future(node, fut): break
         
         ###### POST ACTIONS
-        if i == 2: # grasp bag
-            node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(roller_vel=80, roller_duration=5.0))
-            node.call_cli_sync(node.finger2srv["left_v2"], RollerGripperV2.Request(position=-1.0))
-            time.sleep(0.2)
-            # node.cli_display.call_async(SetDisplay.Request(name="protocol_9"))
-        elif i == 5: # close right gripper
+        if i == 5: # close right gripper
+            node.call_cli_sync(node.finger2srv["right_v2"], RollerGripperV2.Request(position=-0.5))
+            time.sleep(0.4)
             node.call_cli_sync(node.finger2srv["right_v2"], RollerGripperV2.Request(position=-1.0))
-            time.sleep(0.2)
+            time.sleep(0.4)
 
+    node.execute_traj(
+        "both", 
+        np.array([2.5]), 
+        np.array([
+            np.deg2rad([
+                74.16,
+                -112.87,
+                -94.81,
+                -33.03,
+                89.34,
+                -183.47,
+                -68.02,
+                -47.74,
+                62.89,
+                -324.02,
+                88.60,
+                32.82,
+            ])
+        ]))
+    
 PRE_PLACE_LEFT = [
     2.2566,
     -1.6983,
@@ -557,7 +557,23 @@ PLACE_LEFT = [
     -4.5638,
 ]
 
-def main(args=None):
+START_POSE_SHIFTED_LEFT_STUDY = [
+    2.3272,
+    -0.8861,
+    -2.2243,
+    -0.9957,
+    -1.0295,
+    0.8760,
+    -0.9561,
+    -0.1050,
+    1.4287,
+    -2.3651,
+    0.9607,
+    -0.5481,
+]
+
+def main(args=None): 
+    INITAL_POSE_TIME = 4 # before for old pose: 3
     arrays = load_trajectories(f"/home/ros/ws/src/bag_opening/trajectories/")
     # arrays = load_trajectories(f"{os.environ['HOME']}/projects/se_clinic_case/ros_modules/bag_opening/trajectories/")
 
@@ -577,15 +593,17 @@ def main(args=None):
     node = TrajectoryPublisher(with_slides=with_slides)
    
     if with_slides:
-        node.switch_slide("protocol_1")
-        node.initial_pose_new(dur=5)
+        # node.switch_slide("protocol_1")
+        node.initial_pose_new(dur=INITAL_POSE_TIME) # 5
 
-    node.call_cli_sync(node.finger2srv["right_v2"], RollerGripperV2.Request(position=1.0))
-    node.call_cli_sync(node.finger2srv["left_v2"], RollerGripperV2.Request(position=1.0))
+    node.call_cli_sync(node.finger2srv["right_v2"], RollerGripperV2.Request(position=0.8))
+    node.call_cli_sync(node.finger2srv["left_v2"], RollerGripperV2.Request(position=0.8))
 
     while True:
         try:
-            if input("init pose? (Y/n)").lower().strip() != "n": node.initial_pose_new(dur=3)
+            if input("init pose? (Y/n)").lower().strip() != "n": 
+                node.initial_pose_new(dur=INITAL_POSE_TIME) # 3
+                time.sleep(0.4)
 
             if with_slides: node.switch_slide("protocol_bag_1")
             execute_opening(mh2, node, arrays, bag_type=bag_type, with_slides=with_slides)
@@ -593,7 +611,7 @@ def main(args=None):
             if with_slides:
                 time.sleep(1)
                 node.switch_slide("protocol_11")
-                node.initial_pose_new(dur=3)
+                node.initial_pose_new(dur=INITAL_POSE_TIME) # 3
                 break
         except Exception as e:
             print(f"Exection:\n{e}")
