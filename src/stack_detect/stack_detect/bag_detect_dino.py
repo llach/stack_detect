@@ -47,7 +47,7 @@ def offset_pose_local(pose_stamped: PoseStamped, dx=0.0, dy=0.0, dz=0.0) -> Pose
     pose_out.header = pose_stamped.header
     pose_out.pose.position.x = pose_stamped.pose.position.x + offset_global[0]
     pose_out.pose.position.y = pose_stamped.pose.position.y + offset_global[1]
-    pose_out.pose.position.z = pose_stamped.pose.position.z + offset_global[2]
+    pose_out.pose.position.z = pose_stamped.pose.position.z #+ offset_global[2]
     pose_out.pose.orientation = pose_stamped.pose.orientation  # keep same orientation
 
     return pose_out
@@ -203,7 +203,8 @@ class BagDetectNode(Node):
         """Return PoseStamped of left wrist rotated around its local Z axis by `angle_deg`."""
         # --- Base pose (map frame) ---
         base_pos = np.array([0.468, -0.288, 0.940])
-        base_quat = np.array([-0.619, 0.785, 0.009, -0.007])  # (x, y, z, w)
+        # base_quat = np.array([-0.619, 0.785, 0.009, -0.007])  # (x, y, z, w) OLD base quaternion before demo june change
+        base_quat = np.array([0.11866, 0.99293, 0.0043183, 0.0010612])  # (x, y, z, w) NEW orientation without tilting backwards
 
         # base_pos = np.array([0.0, 0.0, 0.0])
         # base_quat = np.array([0.0, 0.0, 0.0, 1.0])  # (x, y, z, w)
@@ -357,8 +358,8 @@ class BagDetectNode(Node):
 
             self.get_logger().info(f"Bag detected. Angle={angle:.2f}°, MapPose=({pose_map.pose.position.x:.3f}, {pose_map.pose.position.y:.3f}, {pose_map.pose.position.z:.3f})")
             return response
-        except:
-            print("DINO DIDN'T WORK!!!!")
+        except Exception as e:
+            print(f"DINO DIDN'T WORK!!!!\n{e}")
             return response
 
 def main(args=None):

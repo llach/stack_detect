@@ -85,6 +85,14 @@ At time 1770971032.36428275
 
 dist y = |-0.089| + 0.089 = 0.178
 
+Left arm wrist 3 link rviz
+position= -0.60312; 0.089287; 1.1915
+orientation (xyzw)= 0.74851; -0.66313; 1.0904e-05; 1.7387e-06 
+
+Right arm wrist 3 link rviz
+position= -0.60312; -0.089269; 1.1915
+orientation= 0.9139; 0.40593; 8.5867e-05; -0.00013591
+
 [INFO] [1770971324.813461649] [tf2_echo]: Waiting for transform map ->  left_arm_wrist_3_link: Invalid frame ID "map" passed to canTransform argument target_frame - frame does not exist
 At time 1770971325.770426867
 - Translation: [0.603, -0.089, 1.191]

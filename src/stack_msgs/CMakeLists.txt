@@ -16,6 +16,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/MoveArm.srv"
   "srv/DINOSrv.srv"
   "srv/SAM2Srv.srv"
+  "srv/GripperCurrent.srv"
   "srv/RollerGripper.srv"
   "srv/RollerGripperV2.srv"
   "srv/StackDetect.srv"

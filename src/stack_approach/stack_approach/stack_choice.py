@@ -361,6 +361,7 @@ class StackDetectorDINO(Node):
                 self.get_logger().info('Waiting for /set_display service...')
 
     def switch_slide(self, slide_name):
+        return
         if not self.with_slides:
             print("NOT switching slides!")
             return
@@ -691,36 +692,52 @@ def apply_local_offset(base_pose_stamped, trans_offset=[0.0, 0.0, 0.0], rot_offs
     return new_pose
 
 def unstack(mh2: MotionHelperV2, node, dist_off=-0.05, height_off=0.021, prim_angle=45):
+    has_success = False
     for _ in range(10):
-        fut = node.sam_client.call_async(StackDetect.Request())
-        rclpy.spin_until_future_complete(node, fut)
+        try:
+            fut = node.sam_client.call_async(StackDetect.Request(store_data=True))
+            rclpy.spin_until_future_complete(node, fut)
 
-        mh2.call_cli_sync(mh2.finger2srv["right_v2"], RollerGripperV2.Request(position=1.0))
+            mh2.call_cli_sync(mh2.finger2srv["right_v2"], RollerGripperV2.Request(position=1.0))
 
-        stack_pose__cam = fut.result().target_pose
-        stack_pose__cam.header.stamp.sec = 0
-        stack_pose__cam.header.stamp.nanosec = 0
+            result = fut.result()
+            if not result.success:
+                print("SAM2 not successful! trying again ...")
+                continue
 
-        finger__map = transform_to_pose_stamped(node.tf_buffer.lookup_transform("map", "right_finger", rclpy.time.Time()))
+            stack_pose__cam = result.target_pose
+            stack_pose__cam.header.stamp.sec = 0
+            stack_pose__cam.header.stamp.nanosec = 0
 
-        stack_pose__map = node.tf_buffer.transform(stack_pose__cam, "map")
-        stack_pose__map.pose.orientation = finger__map.pose.orientation
+            finger__map = transform_to_pose_stamped(node.tf_buffer.lookup_transform("map", "right_finger", rclpy.time.Time()))
 
-        poses = []
-        for dd, dh in [
-            [-0.06, 0.021],     # start
-            [-0.035, 0.004],    # pre-stack
-            [0.015, 0.004],    # insert
-            [0.015, 0.015],     # lift
-            [0.040, 0.015],     # further insertion
-            [-0.02, 0.015],     # pull out
-        ]:
-            p = apply_local_offset(stack_pose__map, trans_offset=[dh, 0, dd], rot_offset_deg=[0,-prim_angle,0])
-            poses.append(mh2.finger_to_wrist(p, "right"))
+            stack_pose__map = node.tf_buffer.transform(stack_pose__cam, "map")
+            stack_pose__map.pose.orientation = finger__map.pose.orientation
 
-        node.stack_pose_pub.publish(PoseArray(header=stack_pose__map.header, poses=[stack_pose__map.pose]+[p.pose for p in poses]))
-        print("done ...")
-        if input("continue? (y/N)").strip().lower() == "y": break
+            poses = []
+            dh_offset = 0.003  # David (13/06): Even with this there is some offset
+            # dh_offset = 0.011  #  0.01 - thin ones, 0.011 doesn't work
+            for dd, dh in [
+                [-0.09, 0.021],     # start  [-0.06, 0.021],
+                [-0.035, 0.004],    # pre-stack
+                [0.015, 0.004],     # insert
+                [0.015, 0.015],     # lift
+                [0.040, 0.015],     # further insertion
+                [-0.02, 0.015],     # pull out
+            ]:
+                p = apply_local_offset(stack_pose__map, trans_offset=[dh+dh_offset, 0, dd], rot_offset_deg=[0,-prim_angle,0])
+                poses.append(mh2.finger_to_wrist(p, "right"))
+
+            node.stack_pose_pub.publish(PoseArray(header=stack_pose__map.header, poses=[stack_pose__map.pose]+[p.pose for p in poses]))
+            print("done ...")
+        except Exception as e:
+            print(f"Unstacking exception:\n{e}")
+        if input("continue? (y/N)").strip().lower() == "y": 
+            has_success = True
+            break
+
+    if not has_success:
+        assert False, "unsuccessful unstacking"
 
     for i, (p, t) in enumerate(zip(poses, [
         3,      # start
@@ -734,32 +751,225 @@ def unstack(mh2: MotionHelperV2, node, dist_off=-0.05, height_off=0.021, prim_an
         time.sleep(0.1)
 
         if i == len(poses)-2:
-            mh2.call_cli_sync(mh2.finger2srv["right_v2"], RollerGripperV2.Request(position=-0.8))
+            mh2.call_cli_sync(mh2.finger2srv["right_v2"], RollerGripperV2.Request(position=0.15))
             time.sleep(0.3)
 
+"""
+world -> right wrist 3 quaternion
+0.14852; 0.98392; 0.00079958; -0.099218
+
+"""
+
+# PLACING_SEQUENCE_ALIGNED = [
+#     [   # intermediate after unstack
+#         -1.4939,
+#         -0.9910,
+#         2.0959,
+#         -1.7361,
+#         1.5754,
+#         4.0280,
+#     ],
+#     [    # pre table
+#         -1.1825,
+#         -0.6518,
+#         1.2790,
+#         -1.6061,
+#         0.9424,
+#         4.3434,
+#     ],
+#     [   # back of table
+#         -0.8224,
+#         -1.0060,
+#         1.9819,
+#         -2.0612,
+#         0.9695,
+#         4.1755,
+#     ],
+#     [   # lower for placing, before release
+#         -0.7247,
+#         -1.0663,
+#         1.9290,
+#         -1.8930,
+#         1.0173,
+#         4.0456,
+#     ],
+#     [   # after release (rotate)
+#         -0.6930,
+#         -1.0804,
+#         2.0059,
+#         -2.1066,
+#         0.8094,
+#         4.1360,
+#     ],
+#     [   # up after release
+#         -0.7868,
+#         -0.9844,
+#         2.1182,
+#         -2.5024,
+#         0.7168,
+#         4.3333,
+#     ],
+#     [   # gg home
+#         -1.4473,
+#         -0.5199,
+#         2.0482,
+#         -2.9699,
+#         0.7932,
+#         -0.0090,
+#     ]
+# ]
+# PLACING_SEQUENCE_ALIGNED_TIMES = [
+#     1,      # intermediate
+#     1,      # pre table
+#     1,      # back of table
+#     0.5,    # lower for placing 
+#     0.25,   # after release (rotate)
+#     0.15,   # up after release 
+#     1.25    # gg home
+# ]
+
+PLACING_SEQUENCE_ALIGNED_V2 = [
+    [   # intermediate after unstack
+        -1.4939,
+        -0.9910,
+        2.0959,
+        -1.7361,
+        1.5754,
+        4.0280,
+    ],
+    [    # pre table
+        -1.1825,
+        -0.6518,
+        1.2790,
+        -1.6061,
+        0.9424,
+        4.3434,
+    ],
+    [   # new mid table, tilted backwards
+        -0.5799,
+        -1.1447,
+        1.9910,
+        -1.5407,
+        1.6626,
+        3.8611,
+    ],
+    [   # move back for release, tilt upright
+        -0.6099,
+        -1.1205,
+        2.1281,
+        -1.9246,
+        1.1741,
+        3.9345,
+    ],
+    [   # gg home
+        -1.4473,
+        -0.5199,
+        2.0482,
+        -2.9699,
+        0.7932,
+        -0.0090,
+    ]
+]
+
+PLACING_SEQUENCE_ALIGNED_V2_TIMES = [
+    1,      # intermediate
+    1,      # pre table
+    0.8,    # mid table, tilted 
+    0.4,    # move back for release
+    1.3    # gg home
+]
+
+
+
+"""
+
+potential new lower, now already tilted backwards
+[
+    -0.5508,
+    -1.1473,
+    1.8986,
+    -1.4951,
+    1.5675,
+    3.8443,
+]
+
+"""
+
+"""
+
+replace back of table; mid of table but tilted backwards
+[
+    -0.5799,
+    -1.1447,
+    1.9910,
+    -1.5407,
+    1.6626,
+    3.8611,
+]
+RELEASE
+
+after release, upright again
+[
+    -0.6099,
+    -1.1205,
+    2.1281,
+    -1.9246,
+    1.1741,
+    3.9345,
+]
+
+"""
+
 def placing_sequence(mh2: MotionHelperV2):
+    scale = 1.0
+
+    for i, (t, q) in enumerate(zip(PLACING_SEQUENCE_ALIGNED_V2_TIMES, PLACING_SEQUENCE_ALIGNED_V2)):
+        mh2.go_to_q(q, time=scale*t, side="right")
+
+        if i == 2:
+            mh2.call_cli_sync(mh2.finger2srv["right_v2"], RollerGripperV2.Request(position=1.0))
+            time.sleep(0.45)
+
+        # input("next?")
+
+def old_placing_sequence(mh2: MotionHelperV2):  # 5.1 seconds
+    scale = 10.0
+    input("next?")
+
     mh2.go_to_q([-1.4939,
         -0.9910,
         2.0959,
         -1.7361,
         1.5754,
         4.0280,
-    ], side="right", time=2) # 3
+    ], side="right", time=scale*1) # 3  | intermediate pose after unstacking
+    input("next?")
     
-    mh2.go_to_q([-1.1826,-0.669801,1.29451,-1.57216,0.941826,4.03527], side="right", time=2) # 2
-    mh2.go_to_q([-0.829086,-1.01202,1.98262,-2.05671,0.951,3.88346], side="right", time=1.5) # 1.5
-    mh2.go_to_q([-0.731177,-1.07293,1.9299,-1.88504,0.999185,3.78101], side="right", time=0.5) # 0.5
+    mh2.go_to_q([-1.1826,-0.669801,1.29451,-1.57216,0.941826,4.03527], side="right", time=scale*1) # 2 | pre table
+    input("next?")
+
+    mh2.go_to_q([-0.829086,-1.01202,1.98262,-2.05671,0.951,3.88346], side="right", time=scale*1) # 1.5 | back of table
+    input("next?")
+
+    mh2.go_to_q([-0.731177,-1.07293,1.9299,-1.88504,0.999185,3.78101], side="right", time=scale*0.5) # 0.5 | lower back of table
+    input("next?")
 
     mh2.call_cli_sync(mh2.finger2srv["right_v2"], RollerGripperV2.Request(position=1.0))
+    input("next?")
+
     time.sleep(0.45)
     
-    mh2.go_to_q([-0.679236,-1.10291,1.97395,-1.87112,1.0267,3.72891], side="right", time=0.25)
-    mh2.go_to_q([-0.740686,-1.06235,2.12228,-2.09265,0.994247,3.7895], side="right", time=0.4)
+    mh2.go_to_q([-0.679236,-1.10291,1.97395,-1.87112,1.0267,3.72891], side="right", time=scale*0.25) # | move further back (to release gown ish)
+    input("next?")
+
+    mh2.go_to_q([-0.740686,-1.06235,2.12228,-2.09265,0.994247,3.7895], side="right", time=scale*0.15)  # 0.4 | move up
+    input("next?")
 
 
-    mh2.go_to_q([-1.10223,-0.746435,2.00881,-2.5518,0.8478,4.20552], side="right", time=1)
+    # mh2.go_to_q([-1.10223,-0.746435,2.00881,-2.5518,0.8478,4.20552], side="right", time=0.7)  # 1 -- not needed?
 
-    mh2.go_to_q([-1.4472,-0.5199,2.0481,-2.9698,0.7930,-0.0089], side="right", time=2)
+    mh2.go_to_q([-1.4472,-0.5199,2.0481,-2.9698,0.7930,-0.0089], side="right", time=scale*1.25)  # 2 -- 1 too much -- 1.2 works but weird final motion | back to gg home
+    input("end?")
 
 STACK_CHOICE_START = [
     -1.6868,
@@ -789,6 +999,14 @@ STACK_CHOICE_START_BOTH
 ]
 """
 
+PRE_STACK_START_THIN = [
+    -2.1758,
+    -1.5987,
+    2.0216,
+    -1.9133,
+    2.4286,
+    3.8264,
+]
 PRE_STACK_START = [
     -2.2036,
     -1.5719,
@@ -847,31 +1065,41 @@ SAFE_TRANSITION_BOTH
 
 """
 
+POST_STACK = [
+    -2.2317,
+    -1.5417,
+    2.0356,
+    -1.9210,
+    2.4224,
+    3.9107,
+]
+
+
 def main(mh2: MotionHelperV2, node: StackDetectorDINO, with_slides=False):
     side = "right"
     input("start?")
 
-    if with_slides: 
-        fut = node.cli_start_switch.call_async(Trigger.Request())
-        rclpy.spin_until_future_complete(node, fut)
+    # if with_slides: 
+        # fut = node.cli_start_switch.call_async(Trigger.Request())
+        # rclpy.spin_until_future_complete(node, fut)
 
     mh2.go_to_q(
         q=SAFE_TRANSITION,
-        time=3,
+        time=1,  # 1 is ok
         side="right"
     )
 
     if with_slides:
-        pre_stack_q = PRE_STACK_START
+        pre_stack_q = PRE_STACK_START_THIN
         mh2.go_to_q(
-            q=PRE_STACK_START,
-            time=3,
+            q=PRE_STACK_START_THIN,
+            time=1,  # 0.8 is ok
             side="right"
         )
     else:
         mh2.go_to_q(
             q=STACK_CHOICE_START,
-            time=2,
+            time=1,
             side="right"
         )
 
@@ -894,15 +1122,19 @@ def main(mh2: MotionHelperV2, node: StackDetectorDINO, with_slides=False):
     unstack(mh2, node)
     print("unstacking done.")
 
+
     mh2.go_to_q(
-        q=pre_stack_q,
-        time=2.5,
+        q=POST_STACK,  # Define a new pre-stack Q a bit higher to avoid hiting the stack
+        time=1,
         side="right"
     )
 
     if not with_slides: input("place?")
+
+
+    # TODO: add here checking if grasping was succesful -- use GripperCurrent should be <-150mA (grasping is usually at -295)
+
     placing_sequence(mh2)
-   
 
 if __name__ == '__main__':
     import sys
@@ -913,6 +1145,13 @@ if __name__ == '__main__':
 
     mh2 = MotionHelperV2()
     node = StackDetectorDINO(with_slides=with_slides)
+
+    # mh2.call_cli_sync(mh2.finger2srv["right_v2"], RollerGripperV2.Request(position=1.0))
+    # input("grasp?")
+    # mh2.call_cli_sync(mh2.finger2srv["right_v2"], RollerGripperV2.Request(position=0.1))
+    # input("place?")
+    # placing_sequence(mh2)
+    # exit(-1)
 
     if with_slides: node.cli_kill_switch.call_async(Trigger.Request())
 

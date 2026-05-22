@@ -137,13 +137,13 @@ class SAMGraspPointExtractor(Node):
             exit(0)
 
     def extract_grasp_point(self, req, res): 
-        return self.get_sam_thing(res)
+        return self.get_sam_thing(req, res)
         while True:
             if input("###################\n#######################\ngood?").strip().lower() == "y": break
         self.get_logger().info("SAM service done!")
         return res
     
-    def get_sam_thing(self, res):
+    def get_sam_thing(self, req, res):
         self.wait_for_data()
         
         ##### Convert image
@@ -192,6 +192,19 @@ class SAMGraspPointExtractor(Node):
             self.get_logger().warn("Layer not found!")
             res.success = False
             return res
+        
+        if req.store_data:
+            path = f"/home/ros/ws/src/bag_opening/gg_full_trials//{datetime.now().strftime('%Y_%m_%d-%H_%M_%S')}_unstack/"
+            os.makedirs(path, exist_ok=True)
+            print(f"STORING DATA TO {path}")
+            with open(f"{path}/data.pkl", "wb") as f:
+                pickle.dump({
+                    "sam_masks": masks,
+                    "dino_out": [boxes_px, pred_phrases, confidences],
+                }, f)
+            image_pil.save(path+"image_raw.png")
+            image_with_box.save(path+"image_with_box.png")
+            Image.fromarray(img_overlay, mode="RGB").save(path+"image_sam.png")
 
         # get 3D point and publish
         center_point = SAM2Model.get_center_point(line_center, depth_img, self.K) # center point is stamped in camera coordinates
