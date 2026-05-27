@@ -12,7 +12,7 @@ from rclpy.action import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
 from control_msgs.action import FollowJointTrajectory
 from softenable_display_msgs.srv import SetDisplay
-from stack_msgs.srv import RollerGripper, StackDetect, MoveArm, RollerGripperV2
+from stack_msgs.srv import RollerGripper, StackDetect, MoveArm, RollerGripperV2, RollerGripperV3
 from stack_approach.motion_helper import MotionHelper
 from stack_approach.controller_switcher import ControllerSwitcher
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
@@ -118,7 +118,9 @@ class TrajectoryPublisher(Node):
             "left": self.create_client(RollerGripper, 'left_roller_gripper'),
             "right": self.create_client(RollerGripper, 'right_roller_gripper'),
             "left_v2": self.create_client(RollerGripperV2, 'left_gripper_normalized'),
-            "right_v2": self.create_client(RollerGripperV2, 'right_gripper_normalized')
+            "right_v2": self.create_client(RollerGripperV2, 'right_gripper_normalized'),
+            "left_v3": self.create_client(RollerGripperV3, 'left_gripper_effort'),
+            "right_v3": self.create_client(RollerGripperV3, 'right_gripper_effort'),
         }
 
         for n, srv in self.finger2srv.items():
@@ -415,8 +417,10 @@ def execute_opening(mh2: MotionHelperV2, node: TrajectoryPublisher, trajs, bag_t
     ))
     rclpy.spin_until_future_complete(node, fut)
 
+    # First arm after approach -> roll gripper
     node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(roller_vel=80, roller_duration=ROLL_TIME_LEFT)) # 3.5
-    node.call_cli_sync(node.finger2srv["left_v2"], RollerGripperV2.Request(position=-1.0))
+    # Now grasp using force command 100 mA
+    node.call_cli_sync(node.finger2srv["left_v3"], RollerGripperV3.Request(effort=0.1))
     time.sleep(0.5)
 
     grasp_pose_up = empty_pose(frame="left_arm_wrist_3_link")
@@ -465,7 +469,9 @@ def execute_opening(mh2: MotionHelperV2, node: TrajectoryPublisher, trajs, bag_t
     else:
         time.sleep(2)
 
+    # Force detected -> open the right gripper
     node.call_cli_sync(node.finger2srv["right_v2"], RollerGripperV2.Request(position=1.0))
+    
     time.sleep(0.2)
 
     fut = node.execute_traj(
@@ -481,6 +487,7 @@ def execute_opening(mh2: MotionHelperV2, node: TrajectoryPublisher, trajs, bag_t
         )
     await_action_future(node, fut)
 
+    # Now open to throw the bag to the bin
     node.call_cli_sync(node.finger2srv["left_v2"], RollerGripperV2.Request(position=1.0))
 
 
@@ -513,11 +520,12 @@ def execute_trajectories(node, arrays):
            if not await_action_future(node, fut): break
         
         ###### POST ACTIONS
-        if i == 5: # close right gripper
-            node.call_cli_sync(node.finger2srv["right_v2"], RollerGripperV2.Request(position=-0.5))
-            time.sleep(0.4)
-            node.call_cli_sync(node.finger2srv["right_v2"], RollerGripperV2.Request(position=-1.0))
-            time.sleep(0.4)
+        if i == 5: # close right gripper using force control 100mA
+            node.call_cli_sync(node.finger2srv["right_v3"], RollerGripperV3.Request(effort=0.1))
+            # node.call_cli_sync(node.finger2srv["right_v2"], RollerGripperV2.Request(position=-0.5))
+            # time.sleep(0.4)
+            # node.call_cli_sync(node.finger2srv["right_v2"], RollerGripperV2.Request(position=-1.0))
+            # time.sleep(0.4)
 
     node.execute_traj(
         "both", 
@@ -596,6 +604,7 @@ def main(args=None):
         # node.switch_slide("protocol_1")
         node.initial_pose_new(dur=INITAL_POSE_TIME) # 5
 
+    # Open both grippers at the start
     node.call_cli_sync(node.finger2srv["right_v2"], RollerGripperV2.Request(position=0.8))
     node.call_cli_sync(node.finger2srv["left_v2"], RollerGripperV2.Request(position=0.8))
 
