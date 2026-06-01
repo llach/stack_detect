@@ -33,12 +33,14 @@ Slide-gate logic
 Unstack integration
 -------------------
   Pressing 1 instantiates StackDetectorDINO (with_slides=True) and runs
-  unstack_utils.run() in a background thread. input() calls inside
+  tui_unstack_utils.run() in a background thread. input() calls inside
   the sequence are routed via _ask(): confirmation prompts show a TUI
   modal; everything else is auto-confirmed. stack_choice is not imported.
 """
+import os
 
 import sys
+import io
 import curses
 import threading
 import time
@@ -187,7 +189,8 @@ class AppState:
             self.unfold_running  = False
             self.bagopen_running = False
             self.queued_slide    = None
-        self.add_log("↺ RESET – flags cleared, slides re-locked, queue cleared")
+            self.current_slide   = 1
+        self.add_log("↺ RESET – flags cleared, re-locked, queue cleared, back to slide 1")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -303,7 +306,7 @@ class RobotNode(Node):
 #  Unstack worker  (runs in a daemon thread)
 # ═══════════════════════════════════════════════════════════════════════════
 
-# run_unstack logic lives in unstack_utils.run()
+# run_unstack logic lives in tui_unstack_utils.run()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -545,6 +548,21 @@ def main_loop(stdscr, state: AppState, node: RobotNode,
 
     state.add_log("TUI started  –  1-4 modules  ← → slides  R reset  Q quit")
 
+    # Redirect stdout so that print() calls from unstack (and anywhere else)
+    # go to the TUI log instead of corrupting the curses display.
+    class _LogWriter(io.TextIOBase):
+        def write(self, s):
+            s = s.strip()
+            if s:
+                state.add_log(f"  [stdout] {s}")
+            return len(s)
+        def flush(self): pass
+
+    _real_stdout = sys.stdout
+    _real_stderr = sys.stderr
+    sys.stdout   = _LogWriter()
+    sys.stderr   = _LogWriter()   # catches Python ROS logger output
+
     def flash(label: str):
         state.last_action      = label
         state.last_action_time = time.time()
@@ -558,15 +576,25 @@ def main_loop(stdscr, state: AppState, node: RobotNode,
     def go_slide(n: int):
         if not (1 <= n <= N_SLIDES):
             return
+        # Gate only applies when moving FORWARD into a locked slide.
+        # Moving backward (n < current) is always allowed so you can
+        # freely navigate back through already-seen slides.
+        going_forward = n > state.current_slide
         status = state.gated_slides().get(n, 'open')
-        if status == 'open':
+        if status == 'open' or not going_forward:
             show_slide(n)
         elif status == 'running':
             with state._lock:
                 state.queued_slide = n
             state.add_log(f"  slide {n} queued – will show when module finishes")
         else:
-            state.add_log(f"⚠  slide {n} locked – trigger the module first (3/4)")
+            nonlocal _last_warn_key, _last_warn_time
+            warn_key = f"locked-{n}"
+            now = time.time()
+            if warn_key != _last_warn_key or now - _last_warn_time > 2.0:
+                state.add_log(f"⚠  slide {n} locked – trigger the module first (3/4)")
+                _last_warn_key  = warn_key
+                _last_warn_time = now
 
     def on_slide_ready(n: int):
         show_slide(n)
@@ -587,12 +615,16 @@ def main_loop(stdscr, state: AppState, node: RobotNode,
             daemon=True
         ).start()
 
+    _last_warn_key  = None   # debounce: suppress repeated warning for same key
+    _last_warn_time = 0.0
+
     while True:
         redraw(stdscr, state)
         time.sleep(0.05)
 
         ch = stdscr.getch()
         if ch == -1:
+            _last_warn_key = None   # reset debounce when key released
             continue
 
         # ── Modal input: Y/N/Backspace/Enter handled first ───────────────
@@ -629,6 +661,8 @@ def main_loop(stdscr, state: AppState, node: RobotNode,
             continue
 
         if ch in (ord('q'), ord('Q')):
+            sys.stdout = _real_stdout
+            sys.stderr = _real_stderr
             break
 
         elif ch == ord('1'):
@@ -657,6 +691,24 @@ def main_loop(stdscr, state: AppState, node: RobotNode,
 # ═══════════════════════════════════════════════════════════════════════════
 
 def main():
+    # Suppress C++ ROS / rcl output while curses owns the terminal.
+    # os.dup2 redirects the raw file descriptors so even C extensions
+    # writing to fd 1/2 directly are silenced. Restored after curses exits.
+    _devnull  = open(os.devnull, 'w')
+    _real_fd1 = os.dup(1)
+    _real_fd2 = os.dup(2)
+
+    def _suppress_fds():
+        os.dup2(_devnull.fileno(), 1)
+        os.dup2(_devnull.fileno(), 2)
+
+    def _restore_fds():
+        os.dup2(_real_fd1, 1)
+        os.dup2(_real_fd2, 2)
+        os.close(_real_fd1)
+        os.close(_real_fd2)
+        _devnull.close()
+
     state = AppState()
 
     start_slide = 1
@@ -686,9 +738,11 @@ def main():
 
     state.add_log("StackDetectorDINO ready")
 
+    _suppress_fds()   # silence C++ ROS output while curses runs
     try:
         curses.wrapper(main_loop, state, node, stack_node, mh2)
     finally:
+        _restore_fds()    # restore real fds before shutdown prints
         node.destroy_node()
         stack_node.destroy_node()
         rclpy.shutdown()
