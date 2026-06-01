@@ -48,20 +48,20 @@ from softenable_display_msgs.srv import SetDisplay
 #  CONFIGURATION  –  edit these to match your setup
 # ═══════════════════════════════════════════════════════════════════════════
 
-N_SLIDES            = 12
+N_SLIDES            = 13
 
 # Which slide is gated on each module finishing?  None = no gate.
-UNFOLD_DONE_SLIDE   = 7
-BAGOPEN_DONE_SLIDE  = 10
+UNFOLD_DONE_SLIDE   = 8
+BAGOPEN_DONE_SLIDE  = 11
 
 # ROS topic / service names
 TOPIC_UNFOLD_DONE   = "/unfold_done"
 TOPIC_BAGOPEN_DONE  = "/bag_open_done"
 SRV_SET_DISPLAY     = "/set_display"
-SRV_UNSTACK         = "/unstack/trigger"
-SRV_GRASP           = "/grasp/trigger"
-SRV_UNFOLD          = "/unfold/trigger"
-SRV_BAGOPEN         = "/bag_open/trigger"
+SRV_UNSTACK         = "/unstack/trigger"   # This needs to be changed so that we use directly here the unstack w/ slides
+SRV_GRASP           = "/grasp_dual_service"
+SRV_UNFOLD          = "/gown_unfold_service"
+SRV_BAGOPEN         = "/bag_open/trigger"  # This needs to be changed so that we use directly here the bag opening perc
 
 SLIDE_PREFIX        = "study"   # slides named study-1 … study-N
 
@@ -150,6 +150,7 @@ class AppState:
             self.unfold_running  = False
             self.bagopen_running = False
             self.queued_slide    = None
+
         self.add_log("↺ RESET – flags cleared, slides re-locked, queue cleared")
 
 
@@ -166,19 +167,24 @@ class RobotNode(Node):
         super().__init__("tui_controller")
         self.state         = state
         self._slide_ready  = on_slide_ready
-
-        self.cli_display = self.create_client(SetDisplay, SRV_SET_DISPLAY)
+        
+        self.cli_display = self.create_client(SetDisplay, SRV_SET_DISPLAY)  
         self.cli_unstack = self.create_client(Trigger,    SRV_UNSTACK)
         self.cli_grasp   = self.create_client(Trigger,    SRV_GRASP)
         self.cli_unfold  = self.create_client(Trigger,    SRV_UNFOLD)
         self.cli_bagopen = self.create_client(Trigger,    SRV_BAGOPEN)
 
-        if UNFOLD_DONE_SLIDE:
-            self.create_subscription(Bool, TOPIC_UNFOLD_DONE,
+        # TOPIC_UNFOLD_DONE   = "/unfold_done"
+        # TOPIC_BAGOPEN_DONE  = "/bag_open_done"
+
+        self.publisher_unfold = self.create_publisher(Bool, TOPIC_UNFOLD_DONE, 10)
+        self.publisher_bag_opening = self.create_publisher(Bool, TOPIC_BAGOPEN_DONE, 10)
+
+        self.create_subscription(Bool, TOPIC_UNFOLD_DONE,
                                      self._cb_unfold_done, 10)
-        if BAGOPEN_DONE_SLIDE:
-            self.create_subscription(Bool, TOPIC_BAGOPEN_DONE,
+        self.create_subscription(Bool, TOPIC_BAGOPEN_DONE,
                                      self._cb_bagopen_done, 10)
+        
 
         state.ros_ready = True
         state.add_log("ROS2 node ready")
@@ -268,7 +274,11 @@ class RobotNode(Node):
             self.state.bagopen_running = True
         self._trigger(self.cli_bagopen, "BAG OPEN")
 
-
+    def reset_unfold_and_bagopen(self):
+        msg = Bool()
+        msg.data = False
+        self.publisher_unfold.publish(msg)
+        self.publisher_bag_opening.publish(msg)
 # ═══════════════════════════════════════════════════════════════════════════
 #  Curses drawing helpers
 # ═══════════════════════════════════════════════════════════════════════════
@@ -549,6 +559,7 @@ def main_loop(stdscr, state: AppState, node: Optional["RobotNode"]):
 
         elif ch == curses.KEY_F10:
             state.do_reset()
+            node.reset_unfold_and_bagopen()
             flash("RESET")
 
 
