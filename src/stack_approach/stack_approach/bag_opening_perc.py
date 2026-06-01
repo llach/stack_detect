@@ -357,12 +357,12 @@ def execute_opening(mh2: MotionHelperV2, node: TrajectoryPublisher, trajs, bag_t
 
     PRE_GRASP_HEIGHT = 0.837 # 0.837
 
-    X_OFFSET = 0.045      # before: 0.05
+    X_OFFSET = 0.035      # before: 0.045
     if bag_type == BagType.NORMAL:
         GRASP_HEIGHT = 0.7917 # normal bags
         TARGET_FORCE = 20
         Y_OFFSET = -0.04  # before: 0.007
-        ROLL_TIME_LEFT = 4.5
+        ROLL_TIME_LEFT = 4.5  # Before 4.5  -- 6.5, 5.5 grasped both layers, 
     elif bag_type == BagType.THIN:
         GRASP_HEIGHT = 0.792
         TARGET_FORCE = 14
@@ -417,11 +417,12 @@ def execute_opening(mh2: MotionHelperV2, node: TrajectoryPublisher, trajs, bag_t
     ))
     rclpy.spin_until_future_complete(node, fut)
 
-    # First arm after approach -> roll gripper
-    node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(roller_vel=80, roller_duration=ROLL_TIME_LEFT)) # 3.5
-    # Now grasp using force command 100 mA
-    node.call_cli_sync(node.finger2srv["left_v3"], RollerGripperV3.Request(effort=0.1))
     time.sleep(0.5)
+    # First arm after approach -> roll gripper
+    node.call_cli_sync(node.finger2srv["left"], RollerGripper.Request(roller_vel=80, roller_duration=ROLL_TIME_LEFT)) # 3.5, before roller vel 80
+    # Now grasp using force command 100 mA
+    node.call_cli_sync(node.finger2srv["left_v3"], RollerGripperV3.Request(effort=0.3))
+    
 
     grasp_pose_up = empty_pose(frame="left_arm_wrist_3_link")
     grasp_pose_up.pose.position.z = -0.02
@@ -521,7 +522,7 @@ def execute_trajectories(node, arrays):
         
         ###### POST ACTIONS
         if i == 5: # close right gripper using force control 100mA
-            node.call_cli_sync(node.finger2srv["right_v3"], RollerGripperV3.Request(effort=0.1))
+            node.call_cli_sync(node.finger2srv["right_v3"], RollerGripperV3.Request(effort=0.3))
             # node.call_cli_sync(node.finger2srv["right_v2"], RollerGripperV2.Request(position=-0.5))
             # time.sleep(0.4)
             # node.call_cli_sync(node.finger2srv["right_v2"], RollerGripperV2.Request(position=-1.0))
@@ -605,7 +606,7 @@ def main(args=None):
         node.initial_pose_new(dur=INITAL_POSE_TIME) # 5
 
     # Open both grippers at the start
-    node.call_cli_sync(node.finger2srv["right_v2"], RollerGripperV2.Request(position=0.8))
+    node.call_cli_sync(node.finger2srv["right_v2"], RollerGripperV2.Request(position=0.6))
     node.call_cli_sync(node.finger2srv["left_v2"], RollerGripperV2.Request(position=0.8))
 
     while True:

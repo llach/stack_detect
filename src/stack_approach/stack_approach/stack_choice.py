@@ -18,7 +18,7 @@ from sensor_msgs.msg import CompressedImage
 from sensor_msgs.msg import Image as ImageMSG, CompressedImage, CameraInfo
 from stack_approach.helpers import publish_img, transform_to_pose_stamped
 from stack_detect.helpers.dino_model import DINOModel, plot_boxes_to_image
-from stack_msgs.srv import StackDetect, RollerGripperV2
+from stack_msgs.srv import StackDetect, RollerGripperV2, RollerGripperV3
 
 
 from motion_helper_v2 import MotionHelperV2
@@ -751,8 +751,9 @@ def unstack(mh2: MotionHelperV2, node, dist_off=-0.05, height_off=0.021, prim_an
         time.sleep(0.1)
 
         if i == len(poses)-2:
-            mh2.call_cli_sync(mh2.finger2srv["right_v2"], RollerGripperV2.Request(position=0.15))
-            time.sleep(0.3)
+            # mh2.call_cli_sync(mh2.finger2srv["right_v2"], RollerGripperV2.Request(position=0.15))
+            mh2.call_cli_sync(mh2.finger2srv["right_v3"], RollerGripperV3.Request(effort=0.3))
+            # time.sleep(0.3)
 
 """
 world -> right wrist 3 quaternion
@@ -928,7 +929,7 @@ def placing_sequence(mh2: MotionHelperV2):
 
         if i == 2:
             mh2.call_cli_sync(mh2.finger2srv["right_v2"], RollerGripperV2.Request(position=1.0))
-            time.sleep(0.45)
+            # time.sleep(0.45)
 
         # input("next?")
 

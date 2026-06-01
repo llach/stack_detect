@@ -8,7 +8,7 @@ from rclpy.node import Node
 from rclpy.action import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
 from control_msgs.action import FollowJointTrajectory
-from stack_msgs.srv import MoveArm, RollerGripper, RollerGripperV2
+from stack_msgs.srv import MoveArm, RollerGripper, RollerGripperV2, RollerGripperV3
 from tf2_geometry_msgs import PoseStamped
 from stack_approach.controller_switcher import ControllerSwitcher
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
@@ -112,7 +112,9 @@ class MotionHelperV2(Node):
             "left": self.create_client(RollerGripper, 'left_roller_gripper'),
             "right": self.create_client(RollerGripper, 'right_roller_gripper'),
             "left_v2": self.create_client(RollerGripperV2, 'left_gripper_normalized'),
-            "right_v2": self.create_client(RollerGripperV2, 'right_gripper_normalized')
+            "right_v2": self.create_client(RollerGripperV2, 'right_gripper_normalized'),
+            "left_v3": self.create_client(RollerGripperV3, 'left_gripper_effort'),
+            "right_v3": self.create_client(RollerGripperV3, 'right_gripper_effort')
         }
 
         self.ik_client = self.create_client(

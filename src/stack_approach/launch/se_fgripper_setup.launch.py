@@ -34,6 +34,7 @@ def generate_launch_description():
             remappings=[
             ('gripper_normalized', 'right_gripper_normalized'),
             ('roller_gripper', 'right_roller_gripper'),
+            ('gripper_effort', 'right_gripper_effort'),
             ],
             parameters=[PathJoinSubstitution([
                 FindPackageShare('iri_softenable_gripper'),
@@ -50,6 +51,7 @@ def generate_launch_description():
             remappings=[
             ('gripper_normalized', 'left_gripper_normalized'),
             ('roller_gripper', 'left_roller_gripper'),
+            ('gripper_effort', 'left_gripper_effort'),
             ],
             parameters=[PathJoinSubstitution([
                 FindPackageShare('iri_softenable_gripper'),

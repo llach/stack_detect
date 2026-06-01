@@ -19,6 +19,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/GripperCurrent.srv"
   "srv/RollerGripper.srv"
   "srv/RollerGripperV2.srv"
+  "srv/RollerGripperV3.srv"
   "srv/StackDetect.srv"
   "srv/StoreData.srv"
   "srv/GripperService.srv"
