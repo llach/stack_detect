@@ -62,7 +62,7 @@ import tui_bagopen_utils
 #  CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════
 
-N_SLIDES            = 13
+N_SLIDES            = 12
 
 UNFOLD_DONE_SLIDE   = 8
 BAGOPEN_DONE_SLIDE  = 11

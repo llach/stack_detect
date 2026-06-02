@@ -226,7 +226,7 @@ class TrajectoryPublisher(Node):
 
     def execute_traj(self, group, ts, qs):
         assert group in ["both", "left", "right"], f"unknown move group: {group}"
-        print(f"executing trajectory with {len(qs)} points in {ts[-1]:.2f}s ...")
+        # print(f"executing trajectory with {len(qs)} points in {ts[-1]:.2f}s ...")
         self.controller_switcher.activate_controller(group2controller[group])
         traj = JointTrajectory()
         traj.points      = []
@@ -273,21 +273,21 @@ def load_trajectories(folder):
 
 
 def await_action_future(node, fut):
-    print("waiting for future ...")
+    # print("waiting for future ...")
     while not fut.done() and rclpy.ok():
         rclpy.spin_once(node, timeout_sec=0.1)
-    print("future done!")
+    # print("future done!")
     goal_handle = fut.result()
     if not goal_handle.accepted:
         print("Trajectory was rejected by the controller!")
         return False
     future_result = goal_handle.get_result_async()
-    print("waiting for future result ...")
+    # print("waiting for future result ...")
     while not future_result.done() and rclpy.ok():
         rclpy.spin_once(node, timeout_sec=0.1)
-    print("future result done!")
+    # print("future result done!")
     result = future_result.result()
-    print(f"Trajectory finished with status: {result.status}")
+    # print(f"Trajectory finished with status: {result.status}")
     return True
 
 
@@ -307,7 +307,7 @@ def move_over_bag(node: TrajectoryPublisher, left_wrist_pose, execution_time=1.5
         fut.result().q_end,
         np.deg2rad([-94.88, -51.86, 135.98, -179.93, 45.55, -72.64])
     ])
-    print("over bag pose", final_pose)
+    # print("over bag pose", final_pose)
     fut = node.execute_traj("both", np.array([3.0]), np.array([final_pose]))
     await_action_future(node, fut)
 
@@ -318,7 +318,7 @@ def execute_trajectories(node: TrajectoryPublisher, arrays):
     for i, arr in enumerate(arrays):
         if i < 4:
             continue
-        print(f"--- T{i} ---")
+        # print(f"--- T{i} ---")
         ts = adjust_ts(arr["ts"], offset=offsets[i], scaling=0.7 if i == 2 else 0.7)
         if i == 5:
             node.finger2srv["right"].call_async(
@@ -337,6 +337,11 @@ def execute_trajectories(node: TrajectoryPublisher, arrays):
            -68.02,  -47.74,  62.89, -324.02,  88.60,   32.82,
         ])]))
 
+def publish_bag_open_ok(node: TrajectoryPublisher):
+    # Publish True so tui_controller unlocks the gated slide
+    msg      = Bool()
+    msg.data = True
+    node.pub_bagopen_done.publish(msg)
 
 def execute_opening(mh2: MotionHelperV2, node: TrajectoryPublisher,
                     trajs, bag_type: BagType, with_slides: bool = False):
@@ -355,7 +360,7 @@ def execute_opening(mh2: MotionHelperV2, node: TrajectoryPublisher,
 
     res = None
     while True:
-        print("calling bag_cli")
+        # print("calling bag_cli")
         fut = node.bag_cli.call_async(StackDetect.Request(
             offset=Point(x=X_OFFSET, y=Y_OFFSET, z=PRE_GRASP_HEIGHT)))
         rclpy.spin_until_future_complete(node, fut)
@@ -412,7 +417,7 @@ def execute_opening(mh2: MotionHelperV2, node: TrajectoryPublisher,
     ))
     rclpy.spin_until_future_complete(node, fut)
 
-    print("going to pre-contact!")
+    # print("going to pre-contact!")
     fut = node.execute_traj(
         "both", np.array([3.5]),
         np.array([[
@@ -425,9 +430,9 @@ def execute_opening(mh2: MotionHelperV2, node: TrajectoryPublisher,
     execute_trajectories(node, trajs)
 
     time.sleep(2.5)
-    if with_slides:
-        node.switch_slide("protocol_bag_2")
-
+    # if with_slides:
+        # node.switch_slide("protocol_bag_2")
+    publish_bag_open_ok(node)
     print("waiting for force!")
     node.wait_for_force_change(1.45)
 
@@ -504,16 +509,12 @@ def run(state, node, bag_node: TrajectoryPublisher, mh2: MotionHelperV2):
 
         if bag_node.with_slides:
             time.sleep(1)
-            bag_node.switch_slide("protocol_11")
+            # bag_node.switch_slide("protocol_11")
             bag_node.initial_pose_new(dur=INITAL_POSE_TIME)
 
         state.add_log("✓ BAG OPEN finished")
 
-        # Publish True so tui_controller unlocks the gated slide
-        msg      = Bool()
-        msg.data = True
-        node.pub_bagopen_done.publish(msg)
-        state.add_log("  published True → /bag_open_done")
+        
 
     except Exception as e:
         state.add_log(f"⚠  BAG OPEN exception: {e}")
