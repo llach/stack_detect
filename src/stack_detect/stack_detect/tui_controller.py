@@ -37,7 +37,7 @@ Unstack integration
   the sequence are routed via _ask(): confirmation prompts show a TUI
   modal; everything else is auto-confirmed. stack_choice is not imported.
 """
-import os
+
 import sys
 import io
 import curses
@@ -561,6 +561,7 @@ def main_loop(stdscr, state: AppState, node: RobotNode,
     stdscr.nodelay(True)
     stdscr.keypad(True)
 
+
     state.add_log("TUI started  –  1-4 modules  ← → slides  R reset  Q quit")
 
     # Redirect stdout so that print() calls from unstack (and anywhere else)
@@ -711,6 +712,7 @@ def main_loop(stdscr, state: AppState, node: RobotNode,
             state.do_reset()
             node.publish_reset()
             flash("RESET")
+            show_slide(1)   # update display + TTS for slide 1
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -718,24 +720,8 @@ def main_loop(stdscr, state: AppState, node: RobotNode,
 # ═══════════════════════════════════════════════════════════════════════════
 
 def main():
+    import os
 
-    # Suppress C++ ROS / rcl output while curses owns the terminal.
-    # os.dup2 redirects the raw file descriptors so even C extensions
-    # writing to fd 1/2 directly are silenced. Restored after curses exits.
-    _devnull  = open(os.devnull, 'w')
-    _real_fd1 = os.dup(1)
-    _real_fd2 = os.dup(2)
-
-    def _suppress_fds():
-        os.dup2(_devnull.fileno(), 1)
-        os.dup2(_devnull.fileno(), 2)
-
-    def _restore_fds():
-        os.dup2(_real_fd1, 1)
-        os.dup2(_real_fd2, 2)
-        os.close(_real_fd1)
-        os.close(_real_fd2)
-        _devnull.close()
 
     state = AppState()
 
@@ -757,7 +743,7 @@ def main():
     # MotionHelperV2 is shared between both.
     mh2        = MotionHelperV2()
     stack_node = tui_unstack_utils.StackDetectorDINO(with_slides=True)
-    bag_node   = tui_bagopen_utils.TrajectoryPublisher(with_slides=True)
+    bag_node   = tui_bagopen_utils.TrajectoryPublisher(with_slides=False)
 
     # Spin all nodes on a shared multi-threaded executor
     executor = MultiThreadedExecutor()
@@ -768,11 +754,9 @@ def main():
 
     state.add_log("StackDetectorDINO ready")
 
-    _suppress_fds()   # silence C++ ROS output while curses runs
     try:
         curses.wrapper(main_loop, state, node, stack_node, bag_node, mh2)
     finally:
-        _restore_fds()    # restore real fds before shutdown prints
         node.destroy_node()
         stack_node.destroy_node()
         bag_node.destroy_node()

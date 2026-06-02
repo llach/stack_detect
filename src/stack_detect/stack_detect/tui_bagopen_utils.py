@@ -48,8 +48,8 @@ from stack_approach.controller_switcher import ControllerSwitcher
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from geometry_msgs.msg import Point, WrenchStamped
 from stack_approach.helpers import empty_pose
-from std_msgs.msg import Bool
 
+from std_msgs.msg import Bool
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  input() routing  (same pattern as tui_unstack_utils)
@@ -184,7 +184,7 @@ class TrajectoryPublisher(Node):
     def switch_slide(self, slide_name):
         if not self.with_slides:
             return
-        self.cli_display.call_async(SetDisplay.Request(name=slide_name))
+        # self.cli_display.call_async(SetDisplay.Request(name=slide_name))
 
     def has_fresh_ft(self):
         if self.latest_ft is None or self.latest_ft_time is None:
@@ -298,9 +298,8 @@ def move_over_bag(node: TrajectoryPublisher, left_wrist_pose, execution_time=1.5
         controller_name = "left_arm_joint_trajectory_controller",
         execution_time  = float(execution_time),
         ik_link         = "left_arm_wrist_3_link",
-        name_target     = ["left_arm_shoulder_pan_joint", "left_arm_shoulder_lift_joint",
-                           "left_arm_elbow_joint",        "left_arm_wrist_1_joint",
-                           "left_arm_wrist_2_joint",      "left_arm_wrist_3_link"],
+        name_target = ["left_arm_shoulder_pan_joint", "left_arm_shoulder_lift_joint",
+                       "left_arm_elbow_joint", "left_arm_wrist_1_joint", "left_arm_wrist_2_joint", "left_arm_wrist_3_joint"]
     )
     fut = node.move_cli.call_async(mar_left_pre)
     rclpy.spin_until_future_complete(node, fut)
@@ -485,7 +484,7 @@ def run(state, node, bag_node: TrajectoryPublisher, mh2: MotionHelperV2):
             return
 
         bag_type = BagType.NORMAL
-        state.add_log("→ BAG OPEN started (with_slides=True)")
+        state.add_log("→ BAG OPEN started (with_slides=False)")
 
         # Open both grippers at the start
         bag_node.call_cli_sync(bag_node.finger2srv["right_v2"],
@@ -493,13 +492,12 @@ def run(state, node, bag_node: TrajectoryPublisher, mh2: MotionHelperV2):
         bag_node.call_cli_sync(bag_node.finger2srv["left_v2"],
                                RollerGripperV2.Request(position=0.8))
 
-        # ── "init pose?" confirmation ──────────────────────────────────────
+        # ── "init pose?" confirmation (only when with_slides, matching original) ──
+        # if bag_node.with_slides:
         if _ask("init pose? (Y/n)").lower().strip() != "n":
             bag_node.initial_pose_new(dur=INITAL_POSE_TIME)
             time.sleep(0.4)
-
-        if bag_node.with_slides:
-            bag_node.switch_slide("protocol_bag_1")
+            # bag_node.switch_slide("protocol_bag_1")
 
         execute_opening(mh2, bag_node, arrays,
                         bag_type=bag_type, with_slides=bag_node.with_slides)
