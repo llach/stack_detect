@@ -38,7 +38,6 @@ Unstack integration
   modal; everything else is auto-confirmed. stack_choice is not imported.
 """
 import os
-
 import sys
 import io
 import curses
@@ -53,9 +52,10 @@ from rclpy.executors import MultiThreadedExecutor
 from std_msgs.msg import Bool
 from std_srvs.srv import Trigger
 from softenable_display_msgs.srv import SetDisplay
+from stack_approach.motion_helper_v2 import MotionHelperV2
 
 import tui_unstack_utils
-from stack_approach.motion_helper_v2 import MotionHelperV2
+import tui_bagopen_utils
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -147,7 +147,10 @@ class AppState:
     # Unstack
     unstack_running:  bool           = False
     unstack_gate:     UnstackGate    = field(default_factory=UnstackGate)
+    # Bag open
+    bagopen_gate:     UnstackGate    = field(default_factory=UnstackGate)
     # Buffer typed by user while modal is open (before Enter)
+    # Shared by both unstack and bagopen modals (only one can be active at a time)
     modal_input:      str            = ""
 
     log_lines:        list           = field(default_factory=list)
@@ -161,7 +164,16 @@ class AppState:
     # ── helpers ──────────────────────────────────────────────────────────
 
     def in_modal(self) -> bool:
-        return self.unstack_running and self.unstack_gate.waiting
+        return ((self.unstack_running and self.unstack_gate.waiting) or
+                (self.bagopen_running  and self.bagopen_gate.waiting))
+
+    def active_gate(self):
+        """Return whichever gate is currently waiting, or None."""
+        if self.unstack_running and self.unstack_gate.waiting:
+            return self.unstack_gate
+        if self.bagopen_running and self.bagopen_gate.waiting:
+            return self.bagopen_gate
+        return None
 
     def gated_slides(self) -> dict:
         result = {}
@@ -424,8 +436,11 @@ def draw_modal(win, state: AppState, h: int, w: int):
     Overlay shown when unstack worker is waiting for Y/N input.
     Drawn over the centre of the screen.
     """
-    gate   = state.unstack_gate
+    gate   = state.active_gate()
+    if gate is None:
+        return
     prompt = gate.prompt.strip() or "continue?"
+    title  = " UNSTACK CONFIRMATION " if state.unstack_gate.waiting else " BAG OPEN CONFIRMATION "
 
     box_w  = min(w - 6, 60)
     box_h  = 7
@@ -443,7 +458,7 @@ def draw_modal(win, state: AppState, h: int, w: int):
     _put(win, box_y + box_h - 1, box_x + 2, "└" + "─" * (box_w - 4) + "┘", attr_box)
 
     # Content
-    title = " UNSTACK CONFIRMATION "
+    # title set above based on active gate
     _put(win, box_y + 1, box_x + (box_w - len(title)) // 2,
          title, attr_box)
     _put(win, box_y + 2, box_x + 3,
@@ -540,7 +555,7 @@ def redraw(stdscr, state: AppState):
 # ═══════════════════════════════════════════════════════════════════════════
 
 def main_loop(stdscr, state: AppState, node: RobotNode,
-              stack_node, mh2):
+              stack_node, bag_node, mh2):
     init_colors()
     curses.curs_set(0)
     stdscr.nodelay(True)
@@ -638,7 +653,9 @@ def main_loop(stdscr, state: AppState, node: RobotNode,
                 answer = state.modal_input.strip().lower()
                 state.add_log(f"  [modal] answered: {answer!r}")
                 state.modal_input = ""
-                state.unstack_gate.answer(answer)
+                gate = state.active_gate()
+                if gate:
+                    gate.answer(answer)
                 continue
             elif 32 <= ch < 127:
                 c = chr(ch).lower()
@@ -677,8 +694,18 @@ def main_loop(stdscr, state: AppState, node: RobotNode,
             node.trigger_unfold()
 
         elif ch == ord('4'):
-            flash("BAG OPEN")
-            node.trigger_bagopen()
+            if state.bagopen_running:
+                state.add_log("⚠  BAG OPEN already running")
+            else:
+                with state._lock:
+                    state.bagopen_running = True
+                    state.modal_input     = ""
+                flash("BAG OPEN")
+                threading.Thread(
+                    target=tui_bagopen_utils.run,
+                    args=(state, node, bag_node, mh2),
+                    daemon=True
+                ).start()
 
         elif ch in (ord('r'), ord('R')):
             state.do_reset()
@@ -691,6 +718,7 @@ def main_loop(stdscr, state: AppState, node: RobotNode,
 # ═══════════════════════════════════════════════════════════════════════════
 
 def main():
+
     # Suppress C++ ROS / rcl output while curses owns the terminal.
     # os.dup2 redirects the raw file descriptors so even C extensions
     # writing to fd 1/2 directly are silenced. Restored after curses exits.
@@ -725,26 +753,29 @@ def main():
 
     node = RobotNode(state, on_slide_ready=lambda n: None)
 
-    # StackDetectorDINO – always with_slides=True
-    # Needs MotionHelperV2 too; both are heavy but initialised once here.
+    # StackDetectorDINO and TrajectoryPublisher – always with_slides=True
+    # MotionHelperV2 is shared between both.
     mh2        = MotionHelperV2()
     stack_node = tui_unstack_utils.StackDetectorDINO(with_slides=True)
+    bag_node   = tui_bagopen_utils.TrajectoryPublisher(with_slides=True)
 
-    # Spin both nodes on a shared multi-threaded executor
+    # Spin all nodes on a shared multi-threaded executor
     executor = MultiThreadedExecutor()
     executor.add_node(node)
     executor.add_node(stack_node)
+    executor.add_node(bag_node)
     threading.Thread(target=executor.spin, daemon=True).start()
 
     state.add_log("StackDetectorDINO ready")
 
     _suppress_fds()   # silence C++ ROS output while curses runs
     try:
-        curses.wrapper(main_loop, state, node, stack_node, mh2)
+        curses.wrapper(main_loop, state, node, stack_node, bag_node, mh2)
     finally:
         _restore_fds()    # restore real fds before shutdown prints
         node.destroy_node()
         stack_node.destroy_node()
+        bag_node.destroy_node()
         rclpy.shutdown()
 
     print("TUI closed.")
