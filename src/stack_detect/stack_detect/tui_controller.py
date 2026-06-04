@@ -62,10 +62,10 @@ import tui_bagopen_utils
 #  CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════
 
-N_SLIDES            = 12
+N_SLIDES            = 13
 
-UNFOLD_DONE_SLIDE   = 8
-BAGOPEN_DONE_SLIDE  = 11
+UNFOLD_DONE_SLIDE   = 9
+BAGOPEN_DONE_SLIDE  = 12
 
 TOPIC_UNFOLD_DONE   = "/unfold_done"
 TOPIC_BAGOPEN_DONE  = "/bag_open_done"

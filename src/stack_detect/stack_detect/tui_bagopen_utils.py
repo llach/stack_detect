@@ -152,6 +152,9 @@ class TrajectoryPublisher(Node):
             "right_v3":self.create_client(RollerGripperV3, 'right_gripper_effort'),
         }
 
+        self.pub_bagopen_done = self.create_publisher(Bool, "/bag_open_done", 1)
+
+
         for n, srv in self.finger2srv.items():
             print("waiting for", n)
             srv.wait_for_service(timeout_sec=1.0)
